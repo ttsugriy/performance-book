@@ -37,6 +37,7 @@ book:
         - chapters/14-inference.qmd
         - chapters/24-mixture-of-experts.qmd
         - chapters/25-long-context.qmd
+        - chapters/26-gpu-memory.qmd
     - part: "Part IV: The Method"
       chapters:
         - chapters/15-measurement.qmd

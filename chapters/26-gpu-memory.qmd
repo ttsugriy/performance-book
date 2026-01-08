@@ -1,0 +1,650 @@
+---
+title: "Mastering GPU Memory"
+subtitle: "Understanding Allocation, Fragmentation, and Optimization"
+id: sec-gpu-memory
+---
+
+---
+
+::: {.chapter-opener}
+"CUDA out of memory" is the most common training failure.
+
+Understanding how GPU memory actually works—not just how much you have—is the difference between running your model and staring at error messages.
+:::
+
+## The Memory Landscape
+
+A typical training run uses GPU memory for:
+
+```
+LLaMA-7B training breakdown (batch size 1, seq 2048):
+
+Model parameters:       14.0 GB (FP16)
+Gradients:              14.0 GB (FP16)
+Optimizer state:        28.0 GB (FP32 Adam momentum + variance)
+Activations:            ~8.0 GB (depends on checkpointing)
+Temporary buffers:      ~2.0 GB (cuBLAS workspace, etc.)
+─────────────────────────────────────────────────────────
+Total:                  ~66 GB
+
+A100 80GB: Fits
+A100 40GB: Doesn't fit
+```
+
+This chapter explains each component and how to optimize it.
+
+## PyTorch CUDA Memory Allocator
+
+### The Caching Allocator
+
+PyTorch doesn't call `cudaMalloc` for every tensor. That would be slow:
+
+```
+cudaMalloc latency: 1-10 ms
+Tensor operation: 0.01-1 ms
+
+If we malloc per tensor: Memory management >> actual compute
+```
+
+Instead, PyTorch uses a **caching allocator**:
+
+```python
+# Conceptual model of PyTorch's allocator
+
+class CachingAllocator:
+    def __init__(self):
+        self.free_blocks = {}  # size -> list of free blocks
+        self.allocated_blocks = {}  # ptr -> (size, block)
+
+    def allocate(self, size):
+        # Round up to allocation granularity
+        size = round_up(size, 512)  # 512-byte granularity
+
+        # Try to find a cached free block
+        if size in self.free_blocks and self.free_blocks[size]:
+            block = self.free_blocks[size].pop()
+            self.allocated_blocks[block.ptr] = (size, block)
+            return block.ptr
+
+        # No cached block—actually allocate from CUDA
+        ptr = cudaMalloc(size)
+        block = Block(ptr, size)
+        self.allocated_blocks[ptr] = (size, block)
+        return ptr
+
+    def free(self, ptr):
+        size, block = self.allocated_blocks.pop(ptr)
+        # Don't actually free—cache for reuse
+        if size not in self.free_blocks:
+            self.free_blocks[size] = []
+        self.free_blocks[size].append(block)
+```
+
+### Inspecting Memory State
+
+```python
+import torch
+
+# Current allocations
+allocated = torch.cuda.memory_allocated()  # Tensors you're using
+reserved = torch.cuda.memory_reserved()    # Total held by allocator
+
+print(f"Allocated: {allocated / 1e9:.2f} GB")
+print(f"Reserved:  {reserved / 1e9:.2f} GB")
+print(f"Free (in cache): {(reserved - allocated) / 1e9:.2f} GB")
+
+# Detailed statistics
+stats = torch.cuda.memory_stats()
+print(f"Current allocated: {stats['allocated_bytes.all.current'] / 1e9:.2f} GB")
+print(f"Peak allocated: {stats['allocated_bytes.all.peak'] / 1e9:.2f} GB")
+print(f"Num allocs: {stats['allocation.all.current']}")
+```
+
+### Memory Snapshots
+
+For debugging OOM, capture a memory snapshot:
+
+```python
+# Enable memory history
+torch.cuda.memory._record_memory_history(max_entries=100000)
+
+# Run your code
+try:
+    train_step()
+except torch.cuda.OutOfMemoryError:
+    # Capture snapshot
+    torch.cuda.memory._dump_snapshot("oom_snapshot.pickle")
+
+# Visualize with:
+# python -m torch.cuda.memory_viz oom_snapshot.pickle -o snapshot.html
+```
+
+The visualization shows:
+- Timeline of allocations
+- What tensors are live at OOM
+- Stack traces for each allocation
+
+## Memory Fragmentation
+
+### How Fragmentation Happens
+
+```
+Scenario: Allocate and free tensors of varying sizes
+
+Step 1: Allocate A (1GB), B (2GB), C (1GB)
+Memory: [A:1GB][B:2GB][C:1GB][free:4GB]
+
+Step 2: Free B
+Memory: [A:1GB][free:2GB][C:1GB][free:4GB]
+
+Step 3: Try to allocate D (3GB)
+Problem: Have 6GB free, but no contiguous 3GB block!
+
+PyTorch options:
+1. Fail with OOM (even though total free > requested)
+2. Call cudaMalloc for new block (may fail at CUDA level)
+```
+
+### Detecting Fragmentation
+
+```python
+def check_fragmentation():
+    """Diagnose memory fragmentation."""
+    allocated = torch.cuda.memory_allocated()
+    reserved = torch.cuda.memory_reserved()
+    total = torch.cuda.get_device_properties(0).total_memory
+
+    fragmentation = (reserved - allocated) / reserved if reserved > 0 else 0
+
+    print(f"Allocated: {allocated / 1e9:.2f} GB")
+    print(f"Reserved:  {reserved / 1e9:.2f} GB")
+    print(f"Total:     {total / 1e9:.2f} GB")
+    print(f"Fragmentation: {fragmentation * 100:.1f}%")
+    print(f"Truly free: {(total - reserved) / 1e9:.2f} GB")
+
+    if fragmentation > 0.3:
+        print("WARNING: High fragmentation. Consider torch.cuda.empty_cache()")
+```
+
+### Mitigating Fragmentation
+
+**1. Consistent tensor sizes**
+
+```python
+# Bad: Variable sizes cause fragmentation
+for seq_len in [128, 256, 512, 1024, 2048]:
+    x = torch.randn(batch, seq_len, hidden)  # Different sizes
+    process(x)
+
+# Better: Pad to consistent size
+max_len = 2048
+for seq_len in [128, 256, 512, 1024, 2048]:
+    x = torch.randn(batch, max_len, hidden)  # Same size
+    x = x[:, :seq_len, :]  # View (no new allocation)
+    process(x)
+```
+
+**2. Pre-allocate buffers**
+
+```python
+class PreallocatedModel(nn.Module):
+    def __init__(self, max_batch, max_seq, hidden):
+        super().__init__()
+        # Pre-allocate work buffers
+        self.register_buffer(
+            'work_buffer',
+            torch.empty(max_batch, max_seq, hidden)
+        )
+
+    def forward(self, x):
+        batch, seq, _ = x.shape
+        # Use pre-allocated buffer
+        work = self.work_buffer[:batch, :seq, :]
+        work.copy_(x)
+        # ... process work ...
+```
+
+**3. Empty cache strategically**
+
+```python
+# Clear cached memory (returns to CUDA, may be slow)
+torch.cuda.empty_cache()
+
+# Use sparingly—once per epoch, not per batch
+for epoch in range(num_epochs):
+    train_epoch()
+    torch.cuda.empty_cache()  # Defragment between epochs
+```
+
+**4. Memory-efficient operations**
+
+```python
+# Bad: Creates intermediate tensor
+y = x + 1
+y = y * 2  # x + 1 is still allocated until y * 2 completes
+
+# Better: In-place operations
+y = x.add_(1).mul_(2)  # No intermediate allocation
+
+# Best: Fused operation
+@torch.compile
+def fused_op(x):
+    return (x + 1) * 2  # Compiler fuses automatically
+```
+
+## Activation Memory
+
+### Why Activations Dominate
+
+Forward pass saves activations for backward:
+
+```
+Transformer layer memory (batch=8, seq=2048, hidden=4096):
+
+Input:          8 × 2048 × 4096 × 2 = 128 MB
+After attention: 128 MB
+After FFN:      128 MB
+LayerNorm saves: 64 MB
+Attention scores: 8 × 32 × 2048 × 2048 × 2 = 2 GB (!)
+
+Per layer: ~2.5 GB
+80 layers: ~200 GB
+
+This is why we need activation checkpointing.
+```
+
+### Activation Checkpointing
+
+Trade compute for memory—don't save activations, recompute during backward:
+
+```python
+from torch.utils.checkpoint import checkpoint
+
+class CheckpointedTransformerBlock(nn.Module):
+    def forward(self, x):
+        # Checkpoint attention
+        x = x + checkpoint(self.attention, x, use_reentrant=False)
+
+        # Checkpoint FFN
+        x = x + checkpoint(self.ffn, x, use_reentrant=False)
+
+        return x
+```
+
+**Memory saved**: Activations only stored at checkpoint boundaries
+
+**Compute cost**: ~33% more FLOPs (recompute forward during backward)
+
+### Selective Checkpointing
+
+Not all layers need checkpointing:
+
+```python
+def apply_selective_checkpointing(model, checkpoint_ratio=0.5):
+    """
+    Checkpoint only some layers.
+
+    Early layers: High memory (close to input), checkpoint these
+    Late layers: Low memory (near output), don't checkpoint
+    """
+    layers = list(model.layers)
+    n_checkpoint = int(len(layers) * checkpoint_ratio)
+
+    for i, layer in enumerate(layers):
+        if i < n_checkpoint:
+            layer.use_checkpoint = True
+        else:
+            layer.use_checkpoint = False
+```
+
+### Optimal Checkpointing
+
+The optimal strategy minimizes peak memory:
+
+```python
+def compute_optimal_checkpoints(layer_memories, budget):
+    """
+    Dynamic programming to find optimal checkpoint placement.
+
+    layer_memories: Memory used by each layer's activations
+    budget: Maximum allowed memory
+    """
+    # Use DP to find minimum checkpoints needed
+    n = len(layer_memories)
+    # dp[i] = min checkpoints for layers 0..i
+
+    # Simplified: checkpoint every sqrt(n) layers is near-optimal
+    checkpoint_interval = int(math.sqrt(n))
+
+    checkpoints = list(range(0, n, checkpoint_interval))
+    return checkpoints
+```
+
+## Optimizer State Memory
+
+### Adam's Memory Cost
+
+Adam stores two additional tensors per parameter:
+
+```python
+# Adam update:
+# m = beta1 * m + (1 - beta1) * grad       # First moment
+# v = beta2 * v + (1 - beta2) * grad^2     # Second moment
+# param -= lr * m / (sqrt(v) + eps)
+
+# Memory:
+# Parameters: P × sizeof(dtype)
+# Gradients: P × sizeof(dtype)
+# m (momentum): P × sizeof(float32) — always FP32!
+# v (variance): P × sizeof(float32) — always FP32!
+
+# For 7B params, FP16 training:
+# Params: 14 GB
+# Grads: 14 GB
+# m: 28 GB (FP32)
+# v: 28 GB (FP32)
+# Total optimizer state: 56 GB
+```
+
+### Memory-Efficient Optimizers
+
+**8-bit Adam (bitsandbytes)**:
+
+```python
+import bitsandbytes as bnb
+
+# Replace Adam with 8-bit version
+optimizer = bnb.optim.Adam8bit(
+    model.parameters(),
+    lr=1e-4,
+    betas=(0.9, 0.999)
+)
+
+# Memory: m and v stored in INT8
+# 7B model: 56 GB → 14 GB optimizer state
+# Quality: Minimal degradation with proper scaling
+```
+
+**Adafactor**:
+
+```python
+from transformers.optimization import Adafactor
+
+# Adafactor uses factored second moments
+optimizer = Adafactor(
+    model.parameters(),
+    lr=1e-3,
+    relative_step=False,
+    scale_parameter=False
+)
+
+# Instead of full v matrix, stores row + column factors
+# Memory: O(rows + cols) instead of O(rows × cols)
+# Works well for large matrices
+```
+
+**SGD with momentum**:
+
+```python
+# Sometimes the simplest solution
+optimizer = torch.optim.SGD(
+    model.parameters(),
+    lr=0.1,
+    momentum=0.9
+)
+
+# Memory: Only one extra tensor (momentum)
+# 7B model: 28 GB optimizer state (vs 56 GB for Adam)
+# Downside: May need more tuning, different learning dynamics
+```
+
+## Memory Offloading
+
+When GPU memory is insufficient, offload to CPU or NVMe.
+
+### CPU Offloading
+
+```python
+# DeepSpeed ZeRO-Offload
+import deepspeed
+
+ds_config = {
+    "zero_optimization": {
+        "stage": 2,
+        "offload_optimizer": {
+            "device": "cpu",
+            "pin_memory": True  # Faster CPU-GPU transfer
+        }
+    }
+}
+
+model, optimizer, _, _ = deepspeed.initialize(
+    model=model,
+    config=ds_config
+)
+```
+
+**How it works**:
+1. Optimizer states live on CPU
+2. Gradients computed on GPU, sent to CPU
+3. Optimizer step on CPU
+4. Updated params sent back to GPU
+
+**Performance**: 2-3x slower than pure GPU, but enables larger models.
+
+### NVMe Offloading
+
+For even larger models:
+
+```python
+ds_config = {
+    "zero_optimization": {
+        "stage": 3,
+        "offload_optimizer": {
+            "device": "nvme",
+            "nvme_path": "/local_nvme"
+        },
+        "offload_param": {
+            "device": "nvme",
+            "nvme_path": "/local_nvme"
+        }
+    }
+}
+```
+
+**Requirements**:
+- Fast NVMe SSD (>3 GB/s read/write)
+- Sufficient CPU RAM for working set
+- 10-100x slower than pure GPU
+
+### When to Offload
+
+```
+Decision tree:
+
+Model fits in GPU with batch size 1?
+  ├─ Yes → Try gradient checkpointing first
+  │         Still OOM? → Try smaller batch + gradient accumulation
+  │         Still OOM? → CPU offload optimizer
+  │
+  └─ No → Need offloading
+          ├─ Optimizer-only offload (ZeRO-2 + offload)
+          │   ~2x slowdown, fits 2x larger model
+          │
+          ├─ Full offload (ZeRO-3 + offload)
+          │   ~5x slowdown, fits 4x+ larger model
+          │
+          └─ NVMe offload
+              ~10x+ slowdown, fits huge models
+```
+
+## Mixed Precision Memory Savings
+
+### The Automatic Savings
+
+```python
+from torch.cuda.amp import autocast
+
+with autocast():
+    # Activations stored in FP16: 2x memory reduction
+    output = model(input)
+
+# Comparison (batch=8, seq=2048, hidden=4096):
+# FP32 activations: 256 MB
+# FP16 activations: 128 MB
+```
+
+### Master Weights Pattern
+
+Keep FP32 copy for optimizer, FP16 for forward/backward:
+
+```python
+class MixedPrecisionWrapper:
+    def __init__(self, model):
+        # FP16 model for forward/backward
+        self.model_fp16 = copy.deepcopy(model).half()
+
+        # FP32 copy for optimizer updates
+        self.model_fp32 = model
+
+    def forward(self, x):
+        return self.model_fp16(x.half())
+
+    def optimizer_step(self, optimizer):
+        # Copy FP16 grads to FP32
+        for p16, p32 in zip(self.model_fp16.parameters(),
+                           self.model_fp32.parameters()):
+            if p16.grad is not None:
+                p32.grad = p16.grad.float()
+
+        # Update in FP32
+        optimizer.step()
+
+        # Copy back to FP16
+        for p16, p32 in zip(self.model_fp16.parameters(),
+                           self.model_fp32.parameters()):
+            p16.data.copy_(p32.data)
+```
+
+## Debugging OOM
+
+### Systematic Approach
+
+```python
+def diagnose_oom():
+    """Run before training to diagnose memory issues."""
+
+    device = torch.device('cuda')
+    props = torch.cuda.get_device_properties(device)
+
+    print(f"GPU: {props.name}")
+    print(f"Total memory: {props.total_memory / 1e9:.2f} GB")
+
+    # Test maximum allocation
+    test_sizes = [1, 2, 4, 8, 16, 32, 64]  # GB
+    max_allocatable = 0
+
+    for size in test_sizes:
+        try:
+            x = torch.empty(int(size * 1e9 / 4), dtype=torch.float32, device=device)
+            max_allocatable = size
+            del x
+            torch.cuda.empty_cache()
+        except:
+            break
+
+    print(f"Max single allocation: {max_allocatable} GB")
+
+    # Check current state
+    print(f"\nCurrent state:")
+    print(f"  Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+    print(f"  Reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
+
+# Call before training
+diagnose_oom()
+```
+
+### Common OOM Patterns
+
+**1. Accumulating gradients incorrectly**
+
+```python
+# Bug: Gradients accumulate without clearing
+for batch in dataloader:
+    loss = model(batch)
+    loss.backward()  # Gradients accumulate!
+    # Missing: optimizer.step() and optimizer.zero_grad()
+
+# Fix:
+for batch in dataloader:
+    optimizer.zero_grad()
+    loss = model(batch)
+    loss.backward()
+    optimizer.step()
+```
+
+**2. Holding references to tensors**
+
+```python
+# Bug: Storing tensors in list
+all_outputs = []
+for batch in dataloader:
+    output = model(batch)
+    all_outputs.append(output)  # Keeps all outputs in memory!
+
+# Fix: Detach and move to CPU, or process incrementally
+all_outputs = []
+for batch in dataloader:
+    output = model(batch)
+    all_outputs.append(output.detach().cpu())
+```
+
+**3. Large intermediate tensors**
+
+```python
+# Bug: Huge intermediate
+def forward(self, x):
+    # This creates a massive N×N matrix
+    similarity = x @ x.T  # If x is 1M × 1K, this is 1M × 1M = 4TB!
+    return similarity.softmax(-1) @ x
+
+# Fix: Chunked computation (like FlashAttention)
+def forward(self, x):
+    return chunked_attention(x, x, x, chunk_size=1024)
+```
+
+## Key Takeaways
+
+1. **Understand the allocator**: PyTorch caches memory; `reserved != allocated`.
+
+2. **Fragmentation is real**: Variable tensor sizes cause holes. Use consistent sizes.
+
+3. **Activations dominate**: Use gradient checkpointing to trade compute for memory.
+
+4. **Optimizer states are huge**: 8-bit Adam or Adafactor can save 4x memory.
+
+5. **Offloading is a last resort**: 2-10x slower, but enables larger models.
+
+6. **Debug systematically**: Memory snapshots show exactly what's consuming space.
+
+7. **Measure before optimizing**: Know your memory breakdown before applying fixes.
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Profile memory with different configurations
+- Visualize memory fragmentation
+- Compare checkpointing strategies
+- Experiment with optimizer memory
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/26-gpu-memory.ipynb)
+:::
+
+## Further Reading
+
+- [PyTorch CUDA Semantics](https://pytorch.org/docs/stable/notes/cuda.html)
+- [PyTorch Memory Management](https://pytorch.org/docs/stable/notes/cuda.html#memory-management)
+- Rajbhandari et al. (2020). "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models"
+- Dettmers et al. (2022). "8-bit Optimizers via Block-wise Quantization"
