@@ -20,23 +20,25 @@ The accelerator market is more diverse than ever:
 Major ML Accelerators (2024-2025):
 
 NVIDIA:
-  - H100 (Hopper): 80GB HBM3, 3.35 TB/s, FP8 support
+  - B200/B100 (Blackwell): 192GB HBM3e, 8 TB/s, FP4 support
+  - H100/H200 (Hopper): 80-141GB HBM3, 3.35-4.8 TB/s, FP8 support
   - A100 (Ampere): 40/80GB HBM2e, 2 TB/s
-  - L4/L40: Inference-focused, lower power
+  - L4/L40S: Inference-focused, lower power
 
 AMD:
   - MI300X: 192GB HBM3, 5.3 TB/s
-  - MI250X: 128GB HBM2e, 3.2 TB/s
+  - MI325X: 256GB HBM3e, 6 TB/s (2025)
 
 Intel:
   - Gaudi 2/3: HBM-based accelerators
   - Data Center Max (Ponte Vecchio)
 
 Apple:
-  - M3 Max/Ultra: Unified memory, Metal API
+  - M3/M4 Max/Ultra: Unified memory, Metal API
 
 Google:
   - TPU v5e/v5p: Custom ASICs, XLA-optimized
+  - TPU v6: Trillium, 4× v5p performance
 ```
 
 ## NVIDIA: A100 vs H100
@@ -142,6 +144,170 @@ def get_optimal_config():
             'tile_size': 64,
             'use_flash_attention_1': True,
         }
+```
+
+## NVIDIA Blackwell: B100 and B200
+
+### The Next Generation (2024-2025)
+
+Blackwell represents another generational leap from Hopper:
+
+```
+                        H100            B100            B200
+─────────────────────────────────────────────────────────────────
+Memory                  80 GB HBM3      192 GB HBM3e    192 GB HBM3e
+Bandwidth               3.35 TB/s       8 TB/s          8 TB/s
+FP16 TFLOPS             989             ~1,800          ~2,250
+FP8 TFLOPS              1,979           ~3,500          ~4,500
+FP4 TFLOPS              N/A             ~7,000          ~9,000
+NVLink                  900 GB/s        1.8 TB/s        1.8 TB/s
+TDP                     700W            700W            1000W
+
+Key Blackwell additions:
+- 5th-gen Tensor Cores (2× Hopper)
+- FP4 support for inference
+- Enhanced TMA (larger tiles)
+- NVLink 5 (2× bandwidth)
+- Decompression engine for compressed models
+```
+
+### FP4: The New Frontier
+
+Blackwell introduces native FP4 (4-bit floating point):
+
+```python
+# FP4 has very limited range: ~±6 with 2 mantissa bits
+# Requires careful scaling
+
+def fp4_linear(x, weight, scale_x, scale_w):
+    """FP4 matrix multiply with per-tensor scaling."""
+
+    # Quantize to FP4
+    x_fp4 = quantize_fp4(x / scale_x)
+    w_fp4 = quantize_fp4(weight / scale_w)
+
+    # Compute in FP4 (uses Blackwell tensor cores)
+    y_fp4 = x_fp4 @ w_fp4.T  # 2× faster than FP8
+
+    # Dequantize
+    return y_fp4.float() * scale_x * scale_w
+
+# Performance:
+# B200 FP4:  ~9,000 TFLOPS
+# B200 FP8:  ~4,500 TFLOPS
+# B200 FP16: ~2,250 TFLOPS
+```
+
+### Decompression Engine
+
+Blackwell includes hardware for on-the-fly model decompression:
+
+```
+Traditional flow:
+Storage → [CPU decompress] → GPU memory → Compute
+
+Blackwell flow:
+Storage → GPU memory (compressed) → [HW decompress] → Compute
+
+Benefits:
+- 2× effective memory capacity
+- Reduced memory bandwidth
+- Faster model loading
+```
+
+**Supported formats:** LZ4, ZSTD, custom trained codecs
+
+### Programming for Blackwell
+
+```python
+def get_optimal_config():
+    """Select config based on GPU architecture."""
+    props = torch.cuda.get_device_properties(0)
+    compute_cap = (props.major, props.minor)
+
+    if compute_cap >= (10, 0):  # Blackwell (B100/B200)
+        return {
+            'use_fp4': True,  # For inference
+            'use_fp8': True,  # For training
+            'tile_size': 512,  # Even larger tiles
+            'use_flash_attention_3': True,  # FA3 optimized for Blackwell
+            'enable_compression': True,
+        }
+    elif compute_cap >= (9, 0):  # Hopper (H100)
+        return {
+            'use_fp8': True,
+            'tile_size': 256,
+            'use_flash_attention_3': True,
+        }
+    elif compute_cap >= (8, 0):  # Ampere (A100)
+        return {
+            'use_fp8': False,
+            'tile_size': 128,
+            'use_flash_attention_2': True,
+        }
+    else:
+        return {
+            'use_fp8': False,
+            'tile_size': 64,
+            'use_flash_attention_1': True,
+        }
+```
+
+### Blackwell Inference Optimization
+
+```python
+# Transformer Engine for Blackwell
+import transformer_engine.pytorch as te
+
+# FP4 inference (Blackwell only)
+with te.fp4_autocast():
+    # Weight compression happens automatically
+    output = model(input)
+
+# Micro-batch scaling for FP4
+# Each 16-element group has its own scale factor
+# Maintains accuracy despite limited FP4 range
+```
+
+### Grace-Blackwell Superchip
+
+The GB200 pairs Blackwell GPU with Grace CPU:
+
+```
+Grace-Blackwell Architecture:
+
+┌─────────────────────────────────────────────────────┐
+│  Grace CPU (72 Arm cores)                           │
+│  - 480 GB LPDDR5X                                   │
+│  - 546 GB/s memory bandwidth                        │
+│  - NVLink-C2C to GPU (900 GB/s)                     │
+├─────────────────────────────────────────────────────┤
+│  Blackwell GPU                                      │
+│  - 192 GB HBM3e                                     │
+│  - 8 TB/s memory bandwidth                          │
+│  - NVLink to other GPUs                             │
+└─────────────────────────────────────────────────────┘
+
+Key benefit: NVLink between CPU and GPU
+- No PCIe bottleneck
+- Unified memory addressing
+- 900 GB/s CPU-GPU bandwidth (vs 64 GB/s PCIe 5.0)
+```
+
+### When to Choose Blackwell
+
+```
+Blackwell B200 best for:
+- Maximum inference throughput (FP4)
+- Very large models (192 GB HBM)
+- Memory-bound training
+- Multi-GPU scaling (NVLink 5)
+
+H100 still good for:
+- Existing deployments
+- FP8 training without FP4 requirements
+- Lower power budget (700W vs 1000W)
+- Cost-sensitive applications
 ```
 
 ## AMD MI300X
@@ -509,19 +675,21 @@ def get_hardware_metrics():
 
 ## Key Takeaways
 
-1. **H100 > A100**: TMA, FP8, clusters provide 2x+ speedup on optimized code.
+1. **Blackwell > H100 > A100**: Each generation adds features (FP4, enhanced TMA, NVLink 5) for significant speedups.
 
-2. **AMD is competitive**: MI300X has more memory and bandwidth; software is catching up.
+2. **H100 > A100**: TMA, FP8, clusters provide 2x+ speedup on optimized code.
 
-3. **Apple Silicon is different**: Unified memory changes optimization strategies.
+3. **AMD is competitive**: MI300X/MI325X have more memory and bandwidth; software is catching up.
 
-4. **TPU needs XLA**: Can't just port CUDA code; requires framework changes.
+4. **Apple Silicon is different**: Unified memory changes optimization strategies.
 
-5. **Abstract hardware differences**: Use config-based optimization, not hardcoded paths.
+5. **TPU needs XLA**: Can't just port CUDA code; requires framework changes.
 
-6. **Benchmark on target**: Performance doesn't transfer across hardware.
+6. **Abstract hardware differences**: Use config-based optimization, not hardcoded paths.
 
-7. **Watch the ecosystem**: Hardware-specific libraries (FA3, Transformer Engine) matter.
+7. **Benchmark on target**: Performance doesn't transfer across hardware.
+
+8. **Watch the ecosystem**: Hardware-specific libraries (FA3, Transformer Engine) matter.
 
 ::: {.callout-note}
 ## Try It Yourself
@@ -538,6 +706,7 @@ The accompanying notebook lets you:
 
 ## Further Reading
 
+- [NVIDIA Blackwell Architecture Whitepaper](https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/)
 - [NVIDIA H100 Whitepaper](https://resources.nvidia.com/en-us-tensor-core)
 - [AMD MI300X Architecture](https://www.amd.com/en/products/accelerators/instinct/mi300.html)
 - [Apple MLX Documentation](https://ml-explore.github.io/mlx/)
