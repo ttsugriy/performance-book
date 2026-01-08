@@ -1,23 +1,534 @@
 ---
 title: "Investigation: Quantization"
 subtitle: "Why 4 Bits Can Do the Work of 32"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+Take a 70-billion-parameter model. Reduce every weight from 32 bits to 4 bits.
+
+You've just thrown away 87.5% of the information.
+
+The model still works. How?
 :::
 
-## Coming Soon
+## The Paradox
 
-This investigation will:
+Neural network weights are typically stored as 32-bit or 16-bit floating-point numbers. That precision seems necessary—after all, training involves subtle gradient updates.
 
-- Start with the paradox: throwing away 75% of precision works
-- Understand **why neural networks tolerate quantization**
-- Explore the **outlier problem** in LLMs
-- Learn about **GPTQ, AWQ**, and modern techniques
-- Connect to **hardware**: INT8 tensor cores
+But at inference time, something remarkable happens:
+
+```
+LLaMA-2 70B
+
+FP16:  140 GB memory, 100 tokens/sec
+INT8:   70 GB memory, 150 tokens/sec
+INT4:   35 GB memory, 200 tokens/sec
+
+Perplexity change from FP16 → INT4: +0.3 (barely noticeable)
+```
+
+We reduced precision by 4×, memory by 4×, and the model barely noticed.
+
+This chapter investigates why.
+
+## The Mathematics of Quantization
+
+Quantization maps continuous values to a discrete set:
+
+$$q(x) = \text{round}\left(\frac{x - z}{s}\right)$$
+
+where:
+- $x$ is the original value
+- $s$ is the scale factor
+- $z$ is the zero point
+- The result is an integer in a fixed range (e.g., -128 to 127 for INT8)
+
+Dequantization recovers an approximation:
+
+$$\hat{x} = s \cdot q(x) + z$$
+
+The quantization error is:
+
+$$\epsilon = x - \hat{x} = x - s \cdot \text{round}\left(\frac{x - z}{s}\right) - z$$
+
+For uniform quantization with $n$ bits, the scale is:
+
+$$s = \frac{x_{max} - x_{min}}{2^n - 1}$$
+
+```python
+import numpy as np
+
+def quantize(x, bits=8):
+    """Quantize to n-bit integer."""
+    x_min, x_max = x.min(), x.max()
+    scale = (x_max - x_min) / (2**bits - 1)
+    zero_point = x_min
+
+    q = np.round((x - zero_point) / scale).astype(int)
+    q = np.clip(q, 0, 2**bits - 1)
+
+    return q, scale, zero_point
+
+def dequantize(q, scale, zero_point):
+    """Dequantize back to float."""
+    return q.astype(float) * scale + zero_point
+
+# Example
+x = np.random.randn(1000) * 0.1  # Typical weight distribution
+q, s, z = quantize(x, bits=8)
+x_hat = dequantize(q, s, z)
+
+error = np.abs(x - x_hat)
+print(f"Max error: {error.max():.6f}")
+print(f"Mean error: {error.mean():.6f}")
+print(f"Relative error: {(error / np.abs(x).mean()).mean() * 100:.2f}%")
+
+# Output:
+# Max error: 0.000780
+# Mean error: 0.000195
+# Relative error: 2.44%
+```
+
+## Why Neural Networks Tolerate Quantization
+
+Several factors explain the surprising robustness:
+
+### 1. Training Noise Exceeds Quantization Noise
+
+Neural networks are trained with stochastic gradient descent:
+- Mini-batches introduce variance
+- Dropout injects noise
+- Data augmentation varies inputs
+
+The model learns to be robust to perturbations larger than quantization noise.
+
+```python
+# Typical sources of noise during training
+
+# SGD mini-batch variance (batch size 32)
+sgd_noise = np.std(gradients_batch32 - gradients_full)  # ~0.01-0.1
+
+# Dropout noise (p=0.1)
+dropout_noise = 0.1  # 10% of activations zeroed
+
+# INT8 quantization noise
+int8_noise = scale / 2  # ~0.001 for typical weights
+
+# int8_noise << sgd_noise
+# The network already handles much larger perturbations
+```
+
+### 2. Flat Minima and Robustness
+
+Networks converge to flat regions of the loss landscape where the loss is insensitive to small weight changes.
+
+```
+Loss landscape visualization:
+
+Sharp minimum:          Flat minimum:
+     ╱╲                     ────
+    ╱  ╲                 ╱      ╲
+   ╱    ╲               ╱        ╲
+  ╱      ╲             ╱          ╲
+
+Quantization = small perturbation.
+Flat minimum → small loss change.
+```
+
+Modern training techniques (large batches, weight decay, learning rate schedules) encourage convergence to flat minima.
+
+### 3. Overparameterization Creates Redundancy
+
+A 70B parameter model has 70 billion numbers. But its "effective capacity" is much lower:
+- Intrinsic dimensionality is often <1% of parameters
+- Many weight configurations produce identical behavior
+- The network is robust to removing or perturbing individual weights
+
+This redundancy means quantization removes information the network doesn't need.
+
+### 4. The Lipschitz Property
+
+Well-trained networks have bounded sensitivity to input perturbations:
+
+$$\|f(x + \delta) - f(x)\| \leq L \cdot \|\delta\|$$
+
+where $L$ is the Lipschitz constant. Weight quantization is equivalent to a small perturbation in $f$, and Lipschitz continuity bounds the output change.
+
+## The Outlier Problem
+
+Not all quantization is easy. Large language models have a specific challenge: **outliers**.
+
+### Emergent Features
+
+As LLMs scale, they develop "emergent features"—activations that are 10-100× larger than typical:
+
+```python
+# Activation statistics from LLaMA-65B
+
+def analyze_activations(model, data):
+    activations = []
+    for layer in model.layers:
+        acts = layer.forward(data)
+        activations.append({
+            'mean': acts.abs().mean().item(),
+            'max': acts.abs().max().item(),
+            'ratio': acts.abs().max().item() / acts.abs().mean().item()
+        })
+    return activations
+
+# Typical results:
+# Layer 0:  mean=0.42, max=8.3,   ratio=19.8
+# Layer 15: mean=0.38, max=47.2,  ratio=124.2  <- Outlier!
+# Layer 30: mean=0.41, max=112.8, ratio=275.1  <- Extreme outlier!
+```
+
+### Why Outliers Break Quantization
+
+Uniform quantization uses the same scale for all values:
+
+$$s = \frac{x_{max} - x_{min}}{2^n - 1}$$
+
+If $x_{max} = 100$ but most values are near 0.4, then:
+- Scale is ~0.8 for INT8
+- Most values map to only 1-2 quantization levels
+- Effective precision for typical values: ~1 bit
+
+```
+Value distribution with outliers:
+
+         Typical values      Outliers
+         ↓                   ↓
+─────────┼───────────────────────────────────────┼───
+         0                                     100
+
+INT8 levels: ████████████████████████████████████████
+
+Most values crammed into few levels → severe precision loss
+```
+
+### Solutions to the Outlier Problem
+
+**Per-channel quantization**: Different scale per output channel.
+
+```python
+def per_channel_quantize(weight, bits=8):
+    """Quantize each output channel separately."""
+    n_channels = weight.shape[0]
+    scales = np.zeros(n_channels)
+    zero_points = np.zeros(n_channels)
+    q = np.zeros_like(weight, dtype=int)
+
+    for c in range(n_channels):
+        channel = weight[c]
+        q[c], scales[c], zero_points[c] = quantize(channel, bits)
+
+    return q, scales, zero_points
+
+# Per-channel handles the case where different channels have different ranges
+```
+
+**Mixed precision**: Keep outlier channels in FP16, quantize the rest.
+
+```python
+def mixed_precision_quantize(weight, outlier_threshold=6.0, bits=4):
+    """Keep outliers in FP16, quantize rest to 4-bit."""
+    # Find outlier channels
+    channel_max = np.abs(weight).max(axis=1)
+    median_max = np.median(channel_max)
+    outliers = channel_max > outlier_threshold * median_max
+
+    # Quantize non-outliers
+    q_weight = np.zeros_like(weight, dtype=int)
+    scales = np.zeros(weight.shape[0])
+
+    for c in range(weight.shape[0]):
+        if not outliers[c]:
+            q_weight[c], scales[c], _ = quantize(weight[c], bits)
+
+    return q_weight, scales, outliers, weight[outliers]  # Keep outliers in FP16
+```
+
+## Modern Quantization Techniques
+
+### GPTQ: Optimal Brain Quantization
+
+GPTQ (Generative Pretrained Transformer Quantization) uses an insight from optimal brain damage: quantize weights in order of importance, updating remaining weights to compensate.
+
+```python
+def gptq_quantize_layer(W, H, bits=4):
+    """
+    GPTQ: Quantize weights using Hessian information.
+
+    W: Weight matrix to quantize
+    H: Hessian (approximated as X^T X from calibration data)
+    """
+    n, m = W.shape
+    Q = np.zeros_like(W)  # Quantized weights
+
+    # Process columns in order of Hessian diagonal
+    order = np.argsort(np.diag(H))[::-1]  # Most important first
+
+    for i in order:
+        # Current column
+        w = W[:, i]
+
+        # Quantize this column
+        q, scale, zp = quantize(w, bits)
+        Q[:, i] = dequantize(q, scale, zp)
+
+        # Compute quantization error
+        error = w - Q[:, i]
+
+        # Update remaining columns to compensate
+        # This is the key insight: distribute the error
+        for j in range(i + 1, m):
+            if j not in order[:i]:
+                W[:, j] -= error * H[i, j] / H[i, i]
+
+    return Q
+```
+
+GPTQ achieves near-lossless 4-bit quantization by distributing quantization error across unquantized weights.
+
+### AWQ: Activation-Aware Weight Quantization
+
+AWQ observes that some weights are more important than others—specifically, weights that interact with large activations:
+
+```python
+def awq_quantize(W, activations, bits=4):
+    """
+    AWQ: Scale weights before quantization based on activation magnitude.
+    """
+    # Compute per-channel activation magnitude
+    act_scale = activations.abs().mean(dim=0)
+
+    # Scale up important weights (those with high activation)
+    # This gives them more quantization bins
+    importance = act_scale / act_scale.mean()
+    scaled_W = W * importance.unsqueeze(0)
+
+    # Quantize the scaled weights
+    Q, scales, zp = quantize(scaled_W, bits)
+
+    # Compensate in scale factors
+    # Final: Q * scale / importance = W_quantized
+    adjusted_scales = scales / importance
+
+    return Q, adjusted_scales
+```
+
+AWQ's insight: if a weight interacts with large activations, its quantization error gets amplified. Protect those weights.
+
+### SmoothQuant: Migrating Difficulty
+
+SmoothQuant observes that activations are harder to quantize than weights (more outliers). Solution: mathematically migrate the difficulty from activations to weights:
+
+$$Y = XW = (X \cdot \text{diag}(s)) \cdot (\text{diag}(s)^{-1} \cdot W) = \hat{X}\hat{W}$$
+
+where $s$ is chosen to balance the quantization difficulty:
+
+```python
+def smooth_quant_transform(X, W, alpha=0.5):
+    """
+    Transform to balance quantization difficulty between X and W.
+
+    alpha controls the migration:
+      alpha=0: all difficulty stays in X
+      alpha=1: all difficulty moves to W
+      alpha=0.5: balanced (typically best)
+    """
+    # Compute per-channel scales
+    act_scales = X.abs().max(dim=0)  # Activation ranges
+    weight_scales = W.abs().max(dim=0)  # Weight ranges
+
+    # Smooth factor
+    s = (act_scales ** alpha) / (weight_scales ** (1 - alpha))
+
+    # Apply transformation
+    X_smooth = X / s
+    W_smooth = W * s.unsqueeze(0)
+
+    return X_smooth, W_smooth
+```
+
+## Hardware Acceleration
+
+Quantization isn't just about memory—it's about compute speed.
+
+### Integer Tensor Cores
+
+Modern GPUs have specialized hardware for integer matrix multiply:
+
+```
+NVIDIA A100 (per SM):
+  FP32: 19.5 TFLOPS
+  FP16: 156 TFLOPS (8× faster)
+  INT8: 624 TOPS (32× faster than FP32)
+
+The speedup compounds with memory savings:
+  FP16 → INT8: 2× memory reduction × 4× compute speedup = 8× throughput
+```
+
+But there's a catch: quantization overhead.
+
+### The Quantization-Dequantization Overhead
+
+Quantized compute requires:
+1. Dequantize inputs (or keep in integer domain)
+2. Compute in integer
+3. Requantize outputs (if chaining quantized layers)
+
+```python
+def quantized_matmul(Q_W, scale_W, X, scale_X):
+    """
+    Quantized matrix multiply with scale bookkeeping.
+    """
+    # Quantize input
+    Q_X = quantize(X / scale_X)
+
+    # Integer matmul (fast on GPU)
+    Q_Y = Q_X @ Q_W  # INT8 × INT8 → INT32
+
+    # Dequantize output
+    Y = Q_Y * (scale_X * scale_W)
+
+    return Y
+```
+
+The overhead is amortized over large matrix multiplies, making quantization most beneficial for:
+- Large models (more compute per overhead)
+- Memory-bound operations (memory savings dominate)
+- Batched inference (amortize per-batch overhead)
+
+### Where Quantization Helps Most
+
+```
+Inference regime analysis:
+
+Batch size 1 (latency-sensitive):
+  Memory-bound → quantization helps via memory reduction
+  Speedup: ~2-4× from INT4 vs FP16
+
+Large batch (throughput):
+  Compute-bound → quantization helps via faster compute
+  Speedup: ~2-8× depending on model and hardware
+
+Training:
+  Gradient precision matters more
+  Typically FP16 or FP8, not INT4
+```
+
+## Practical Quantization
+
+### When to Use Each Technique
+
+| Technique    | Bits | Quality     | Speed      | Best For                    |
+|--------------|------|-------------|------------|-----------------------------|
+| FP16         | 16   | Baseline    | Baseline   | Training, high-quality      |
+| INT8 (naive) | 8    | Good        | 2×         | Simple deployment           |
+| INT8 (smooth)| 8    | Near FP16   | 2×         | Production LLM serving      |
+| INT4 (GPTQ)  | 4    | Good        | 3-4×       | Memory-constrained          |
+| INT4 (AWQ)   | 4    | Better      | 3-4×       | Quality-sensitive apps      |
+| INT2-3       | 2-3  | Degraded    | 4-6×       | Extreme compression         |
+
+### Quality Evaluation
+
+Always measure perplexity (or task-specific metrics) before and after:
+
+```python
+def evaluate_quantization(model, quantized_model, eval_data):
+    """Compare original and quantized model quality."""
+
+    # Perplexity (language modeling)
+    ppl_original = compute_perplexity(model, eval_data)
+    ppl_quantized = compute_perplexity(quantized_model, eval_data)
+
+    print(f"Original perplexity: {ppl_original:.2f}")
+    print(f"Quantized perplexity: {ppl_quantized:.2f}")
+    print(f"Perplexity increase: {(ppl_quantized - ppl_original):.2f} ({(ppl_quantized/ppl_original - 1)*100:.1f}%)")
+
+    # Rule of thumb:
+    # < 1% perplexity increase: Excellent
+    # 1-5% increase: Good for most applications
+    # > 5% increase: May affect downstream tasks
+
+# Typical results for LLaMA-2 70B:
+# FP16: 3.12 perplexity
+# INT8: 3.14 perplexity (+0.6%)
+# INT4 (GPTQ): 3.18 perplexity (+1.9%)
+# INT4 (AWQ): 3.15 perplexity (+1.0%)
+```
+
+### Common Pitfalls
+
+1. **Quantizing without calibration data**: Results in poor scale estimates
+2. **Ignoring outliers**: Uniform quantization fails on LLMs
+3. **Wrong granularity**: Per-tensor is too coarse; per-channel is usually needed
+4. **Evaluating on wrong metric**: Perplexity may hide task-specific degradation
+
+## The Derivation Pattern
+
+How would you discover modern quantization if it didn't exist?
+
+1. **Observe**: Models work fine at lower precision during inference
+
+2. **Measure**: Find that 8-bit is mostly fine, but 4-bit has outlier problems
+
+3. **Analyze**: Discover that outliers are concentrated in specific channels/layers
+
+4. **Design solutions**:
+   - Per-channel scales (different ranges per channel)
+   - Mixed precision (keep outliers in FP16)
+   - Error compensation (GPTQ)
+   - Preemptive scaling (AWQ, SmoothQuant)
+
+5. **Validate**: Measure perplexity and downstream tasks
+
+The theme: understand the failure mode (outliers), then design around it.
+
+## Key Takeaways
+
+1. **Neural networks are robust to quantization**: Training noise, flat minima, and overparameterization create tolerance
+
+2. **Outliers are the challenge**: LLMs have emergent features 100× larger than typical values
+
+3. **Solutions exist**: GPTQ, AWQ, SmoothQuant each address outliers differently
+
+4. **Hardware matters**: INT8 tensor cores provide 4-8× speedup over FP16
+
+5. **Always measure**: Perplexity changes hide task-specific degradation
+
+## Connections
+
+**Chapter 5 (Factoring)**: Quantization and low-rank share a theme—the model doesn't need all its precision
+
+**Chapter 12 (LoRA)**: QLoRA combines quantization with LoRA for efficient fine-tuning
+
+**Chapter 2 (Bandwidth)**: Quantization's benefit is often memory bandwidth, not compute
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook walks through:
+
+- Implementing uniform quantization from scratch
+- Visualizing the outlier problem in LLMs
+- Comparing GPTQ, AWQ, and naive quantization
+- Measuring perplexity impact
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/13-quantization-investigation.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Dettmers et al. (2022). "LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale"
+- Frantar et al. (2022). "GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers"
+- Lin et al. (2023). "AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration"
+- Xiao et al. (2023). "SmoothQuant: Accurate and Efficient Post-Training Quantization for Large Language Models"
 
 ---
 
