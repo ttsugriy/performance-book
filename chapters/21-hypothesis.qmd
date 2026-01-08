@@ -1,6 +1,7 @@
 ---
 title: "The Art of Hypothesis"
 subtitle: "Finding the Bottleneck Before Optimizing"
+id: sec-hypothesis
 ---
 
 ::: {.chapter-opener}

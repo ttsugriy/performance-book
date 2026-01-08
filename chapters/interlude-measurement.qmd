@@ -1,0 +1,72 @@
+# Interlude: A Measurement Mindset {.unnumbered}
+
+Before we dive into the mathematical properties that enable optimization, we need to establish a crucial skill: the ability to measure performance accurately. This brief interlude introduces the mindset you'll need for the investigations ahead.
+
+## The First Principle
+
+Performance optimization follows a simple rule:
+
+> **Measure, then optimize. Never the reverse.**
+
+This sounds obvious, but it's violated constantly. Developers optimize code based on intuition, past experience, or "common knowledge"—and often make things worse or optimize the wrong thing entirely.
+
+## What to Measure
+
+Three questions guide every performance investigation:
+
+1. **Where is time spent?** Identify which operations consume the most time.
+2. **Why is it slow?** Determine the limiting resource (compute, memory, I/O).
+3. **What's the theoretical limit?** Know when you've extracted most available performance.
+
+## The Roofline Preview
+
+We introduced the roofline model in @sec-bandwidth-tyranny. It tells us the maximum achievable performance for any operation based on its arithmetic intensity:
+
+$$\text{Performance} \leq \min(\text{Peak FLOPS}, \text{Bandwidth} \times \text{Arithmetic Intensity})$$
+
+If your code achieves 50% of the roofline limit, you've done reasonably well. If it achieves 5%, there's significant room for improvement—and you should investigate why.
+
+## Quick Measurement Techniques
+
+For the investigations in this book, you'll need:
+
+**Timing**: Use high-resolution timers (`time.perf_counter()` in Python, `std::chrono::high_resolution_clock` in C++). Run multiple trials and report medians or percentiles, not means.
+
+**Profiling**: CPU profilers (perf, VTune) and GPU profilers (Nsight, nvprof) reveal where time actually goes. They often surprise us.
+
+**Memory tracking**: Monitor memory bandwidth utilization. A memory-bound kernel running at 80% of peak bandwidth is nearly optimal for its arithmetic intensity.
+
+## The Investigation Framework
+
+Each investigation in Part III follows a pattern:
+
+1. **Baseline**: Measure the naive implementation
+2. **Bound**: Calculate the theoretical limit
+3. **Gap analysis**: Why is actual << theoretical?
+4. **Hypothesis**: What optimization should help?
+5. **Experiment**: Implement and measure
+6. **Iterate**: Repeat until satisfied or at roofline
+
+This scientific approach—hypothesis, experiment, analysis—prevents wasted effort on ineffective optimizations.
+
+## A Warning About Microbenchmarks
+
+Microbenchmarks measure small, isolated pieces of code. They're useful but dangerous:
+
+- **Warmup matters**: First runs include JIT compilation, cache warming, and other one-time costs
+- **Context matters**: Code behaves differently in isolation vs. real workloads
+- **Statistics matter**: Report distributions, not single numbers
+
+We'll cover these topics in depth in @sec-measurement. For now, remember: be skeptical of any single timing measurement.
+
+## Moving Forward
+
+With this measurement mindset, you're ready to explore the algebra of efficiency. As we examine associativity, separability, sparsity, and locality, keep asking: "How would I measure if this optimization actually helps?"
+
+The best performance engineers aren't those who know the most tricks—they're those who measure most carefully.
+
+::: {.callout-note}
+## Full Methodology
+
+Part IV (@sec-measurement, @sec-hypothesis, @sec-analogy) provides comprehensive coverage of measurement techniques, hypothesis-driven debugging, and the pattern library. Consider reading those chapters after completing Part II if you want a deeper foundation before tackling the investigations.
+:::

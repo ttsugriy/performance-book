@@ -18,6 +18,7 @@ book:
         - chapters/01-ram-model-lie.qmd
         - chapters/02-bandwidth-tyranny.qmd
         - chapters/03-parallel-trap.qmd
+        - chapters/interlude-measurement.qmd
     - part: "Part II: The Algebra of Efficiency"
       chapters:
         - chapters/04-chunking.qmd

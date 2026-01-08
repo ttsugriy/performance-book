@@ -1,6 +1,7 @@
 ---
 title: "The Art of Analogy"
 subtitle: "Finding Related Problems That Have Been Solved"
+id: sec-analogy
 ---
 
 ::: {.chapter-opener}

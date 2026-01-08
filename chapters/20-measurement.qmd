@@ -1,6 +1,7 @@
 ---
 title: "The Art of Measurement"
 subtitle: "How to Know What's Actually Happening"
+id: sec-measurement
 ---
 
 ::: {.chapter-opener}

@@ -1,6 +1,7 @@
 ---
 title: "The Tyranny of Bandwidth"
 subtitle: "Why Moving Data Costs More Than Computing"
+id: sec-bandwidth-tyranny
 ---
 
 ::: {.chapter-opener}
