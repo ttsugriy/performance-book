@@ -1,0 +1,127 @@
+# Glossary {.unnumbered}
+
+This glossary defines key terms used throughout the book. Terms are organized alphabetically.
+
+---
+
+**Arithmetic Intensity**
+: The ratio of floating-point operations to bytes transferred from memory. Measured in FLOPS/byte. High arithmetic intensity operations are compute-bound; low arithmetic intensity operations are memory-bound. See @sec-bandwidth-tyranny.
+
+**Associativity**
+: A mathematical property where $(a \oplus b) \oplus c = a \oplus (b \oplus c)$ for some operation $\oplus$. Enables chunked and parallel processing because results can be combined in any order. The foundation of streaming algorithms and online computations.
+
+**Bandwidth**
+: The rate at which data can be transferred, measured in bytes per second. Memory bandwidth (HBM to compute units) is often the primary performance bottleneck for modern ML workloads.
+
+**Cache Hit**
+: When requested data is found in a faster cache level, avoiding access to slower memory. Cache hit rate strongly affects performance for memory-bound workloads.
+
+**Cache Line**
+: The minimum unit of data transfer between memory hierarchy levels. Typically 64 bytes on modern CPUs. Accessing a single byte loads an entire cache line.
+
+**Cache Miss**
+: When requested data is not in cache and must be fetched from a slower memory level. The cost of a miss depends on which level the data is found (L2, L3, DRAM).
+
+**Compute-Bound**
+: A workload where execution time is limited by the rate of arithmetic operations rather than memory bandwidth. Compute-bound kernels can approach peak FLOPS.
+
+**Depthwise Separable Convolution**
+: A factorization of standard convolution into depthwise (spatial) and pointwise (channel-mixing) operations. Reduces parameters and compute by a factor of the kernel size.
+
+**DRAM**
+: Dynamic Random Access Memory. Main system memory, slower than SRAM caches but with much larger capacity. Typical latency: 50-100 nanoseconds.
+
+**FlashAttention**
+: An algorithm for exact attention computation that uses tiling and online softmax to avoid materializing the O(n²) attention matrix. Reduces memory from O(n²) to O(n).
+
+**FLOPS**
+: Floating-Point Operations Per Second. A measure of computational throughput. Modern GPUs achieve hundreds of teraFLOPS (10¹² operations/second).
+
+**Fused Kernel**
+: A GPU kernel that combines multiple operations into a single pass over data, reducing memory traffic. Example: fusing ReLU into matrix multiply.
+
+**HBM (High Bandwidth Memory)**
+: GPU memory with high bandwidth (3+ TB/s on modern GPUs) but limited capacity (40-80GB). The primary memory for large tensors.
+
+**L1/L2/L3 Cache**
+: Hierarchical on-chip memory with decreasing speed and increasing size. L1 is fastest (1-4 cycles), L3 is slowest but largest.
+
+**Latency**
+: Time to complete a single operation or request. Contrast with throughput (operations per second).
+
+**LoRA (Low-Rank Adaptation)**
+: A fine-tuning technique that freezes pretrained weights and adds trainable low-rank matrices. Exploits the observation that weight updates during fine-tuning are approximately low-rank.
+
+**Low-Rank Approximation**
+: Approximating a matrix $W \approx AB$ where $A$ and $B$ have lower rank than $W$. Reduces parameters from $mn$ to $(m+n)r$ where $r$ is the rank.
+
+**Memory-Bound**
+: A workload where execution time is limited by the rate of data transfer rather than computation. Most ML inference workloads are memory-bound.
+
+**Memory Hierarchy**
+: The organization of memory into levels of decreasing speed and increasing capacity: registers → L1 → L2 → L3 → DRAM → SSD → disk.
+
+**Mixture of Experts (MoE)**
+: An architecture where only a subset of model parameters are activated for each input. Enables larger models without proportional compute increase.
+
+**Monoid**
+: An algebraic structure with an associative operation and identity element. The theoretical foundation for parallel reductions and streaming algorithms.
+
+**Operator Fusion**
+: Combining multiple operations into a single kernel to reduce memory traffic. A key optimization in deep learning compilers like torch.compile.
+
+**Prefetching**
+: Loading data into cache before it's needed, hiding memory latency. Hardware prefetchers detect streaming access patterns; software can provide explicit hints.
+
+**Quantization**
+: Representing numbers with fewer bits (e.g., FP16 instead of FP32, or INT8 instead of FP16). Reduces memory footprint and bandwidth, sometimes with specialized hardware support.
+
+**Roofline Model**
+: A visual model showing maximum achievable performance as a function of arithmetic intensity. Performance is bounded by min(peak FLOPS, bandwidth × intensity).
+
+**Separability**
+: A property where a function can be decomposed into simpler, independent components. Enables factorization optimizations like separable filters and low-rank approximations.
+
+**SIMD**
+: Single Instruction, Multiple Data. Processing multiple data elements with a single instruction. Essential for efficient vectorized code.
+
+**Sparsity**
+: Having many zero or near-zero values in a matrix or tensor. Structured sparsity (e.g., 2:4 patterns) enables hardware acceleration.
+
+**SRAM (Static RAM)**
+: Fast on-chip memory used for caches and GPU shared memory. Lower latency than DRAM but limited capacity. GPU shared memory is typically 100-200KB per SM.
+
+**Streaming Algorithm**
+: An algorithm that processes data in a single pass, maintaining only a small summary state. Enabled by associative operations with bounded state.
+
+**Tensor Core**
+: Specialized hardware for matrix multiply-accumulate operations. Achieves much higher throughput than standard FP32 cores but requires specific data formats.
+
+**Tiling**
+: Dividing data into blocks that fit in fast memory, processing each tile entirely before moving to the next. Reduces memory traffic at the cost of code complexity.
+
+**Throughput**
+: The number of operations completed per unit time. Contrast with latency (time per operation).
+
+**Working Set**
+: The set of data actively being accessed. Performance depends on whether the working set fits in each cache level.
+
+---
+
+::: {.callout-tip}
+## Cross-Reference Guide
+
+| Concept | Primary Chapter |
+|---------|----------------|
+| Memory hierarchy | Chapter 1 |
+| Bandwidth and roofline | Chapter 2 |
+| Parallelism | Chapter 3 |
+| Associativity and chunking | Chapter 4 |
+| Separability and factoring | Chapter 5 |
+| Sparsity and skipping | Chapter 6 |
+| Locality and tiling | Chapter 7 |
+| FlashAttention | Chapter 11 |
+| LoRA | Chapter 12 |
+| Quantization | Chapter 13 |
+| Measurement | Chapter 20 |
+:::

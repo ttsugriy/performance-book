@@ -36,6 +36,9 @@ book:
         - chapters/20-measurement.qmd
         - chapters/21-hypothesis.qmd
         - chapters/22-analogy.qmd
+    - part: "Appendices"
+      chapters:
+        - chapters/glossary.qmd
 
 format:
   html:
