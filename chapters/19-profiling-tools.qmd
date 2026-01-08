@@ -1,0 +1,628 @@
+---
+title: "Profiling Tools: From Novice to Expert"
+subtitle: "Mastering the Art of Measurement"
+id: sec-profiling-tools
+---
+
+::: {.chapter-opener}
+You can't optimize what you can't measure. But most engineers use profilers wrong.
+
+They sample too infrequently, misinterpret results, chase noise, and miss the real bottlenecks. This chapter teaches profiling literacy—the foundation of all performance work.
+:::
+
+## The Profiler's Mindset
+
+Before diving into tools, understand what profilers **can** and **cannot** tell you:
+
+**Profilers can:**
+- Show where time is spent (hotspots)
+- Identify CPU vs memory vs I/O bound
+- Reveal unexpected behavior (cache misses, branch mispredicts)
+- Compare before/after optimizations
+
+**Profilers cannot:**
+- Tell you WHY something is slow (you must hypothesize)
+- Fix performance bugs (only reveal them)
+- Replace thinking with data
+- Give exact numbers (sampling introduces variance)
+
+**The golden rule**: Profile to form hypotheses, not to find answers.
+
+## CPU Profiling with `perf`
+
+`perf` is the Swiss Army knife of Linux performance analysis. It's built into the kernel, low-overhead, and comprehensive.
+
+### Quick Start: Finding Hotspots
+
+```bash
+# Record performance data
+perf record -g ./my_program
+
+# View results
+perf report
+```
+
+**What you see:**
+
+```
+# Overhead  Command    Shared Object      Symbol
+# ........  .........  .................  ......
+    45.23%  my_program my_program         [.] matrix_multiply
+    23.15%  my_program libc-2.31.so       [.] memcpy
+    12.45%  my_program my_program         [.] softmax_kernel
+     8.32%  my_program libpython3.9.so    [.] PyEval_EvalFrameDefault
+```
+
+**Interpretation:**
+- 45% of CPU time in `matrix_multiply` - prime optimization target
+- 23% in `memcpy` - might be unnecessary copies
+- 12% in `softmax_kernel` - worth investigating if it's on critical path
+- 8% in Python interpreter - acceptable overhead
+
+### Understanding Sampling
+
+`perf` works by **sampling** - interrupting the program periodically and recording state.
+
+**Default: 1000 samples/second (1ms intervals)**
+
+```bash
+# Increase sampling frequency (more accurate, higher overhead)
+perf record -F 4000 -g ./my_program  # 4000 Hz
+
+# Decrease for low-overhead production profiling
+perf record -F 99 -g ./my_program    # 99 Hz
+```
+
+**Important**: Higher frequency ≠ always better. Overhead can distort results.
+
+### Hardware Performance Counters
+
+Modern CPUs have hundreds of performance counters. `perf` exposes them.
+
+**Cache misses:**
+```bash
+perf stat -e cache-references,cache-misses ./my_program
+```
+
+Output:
+```
+ Performance counter stats for './my_program':
+
+    1,234,567,890  cache-references
+       45,678,901  cache-misses  # 3.7% of all cache refs
+
+       2.345678 seconds time elapsed
+```
+
+**Interpretation**: 3.7% cache miss rate. Good for sequential access; concerning for random access.
+
+**Branch mispredictions:**
+```bash
+perf stat -e branches,branch-misses ./my_program
+```
+
+**CPU cycles and instructions:**
+```bash
+perf stat -e cycles,instructions ./my_program
+```
+
+**IPC (Instructions Per Cycle)**: `instructions / cycles`
+- IPC > 2: Good CPU utilization
+- IPC < 1: Likely memory-bound or stalled
+
+### Finding Cache Hotspots
+
+```bash
+perf record -e cache-misses -g ./my_program
+perf report
+```
+
+This shows **which functions** cause cache misses, not just the count.
+
+### Annotated Source
+
+See exactly which lines are slow:
+
+```bash
+perf record ./my_program
+perf annotate matrix_multiply
+```
+
+Output shows assembly with cycle counts:
+```asm
+  0.00 │   mov    %rdi,%rax
+ 34.21 │   vmovups (%rsi,%rax,4),%ymm0   ← Hot! 34% of time
+  0.15 │   vfmadd231ps (%rdx,%rax,4),%ymm0,%ymm1
+ 28.43 │   vmovups 0x20(%rsi,%rax,4),%ymm0
+  ...
+```
+
+This memory load takes 34% of time - likely a cache miss.
+
+### Off-CPU Profiling
+
+CPU profiling only shows time ON the CPU. What about blocked threads?
+
+```bash
+# Requires bpftrace or similar
+perf record -e 'sched:sched_switch' -g --call-graph dwarf ./my_program
+```
+
+Shows time spent waiting (I/O, locks, etc.).
+
+## GPU Profiling with Nsight
+
+GPU profiling is fundamentally different from CPU profiling.
+
+### Nsight Systems: The Big Picture
+
+Nsight Systems shows **timeline**: what the GPU is doing over time.
+
+```bash
+nsys profile -o output.qdrep python train.py
+```
+
+**Open `output.qdrep` in Nsight Systems GUI.**
+
+**What you see:**
+- CUDA API calls (cudaMemcpy, kernel launches)
+- Kernel execution on GPU
+- CPU threads
+- Gaps (idle time)
+
+**Common patterns to look for:**
+
+1. **GPU bubbles**: Gaps between kernels
+   - Cause: CPU launch overhead
+   - Fix: Kernel fusion, larger batches
+
+2. **CPU-GPU synchronization**:
+   - Cause: Unnecessary `synchronize()` calls
+   - Fix: Remove or defer synchronization
+
+3. **Memory copy dominance**:
+   - Cause: Too much H2D or D2H traffic
+   - Fix: Keep data on GPU, fuse operations
+
+### Nsight Compute: Kernel-Level Analysis
+
+Nsight Compute profiles **individual kernels** in detail.
+
+```bash
+ncu -o profile --set full python train.py
+```
+
+**Open `profile.ncu-rep` in Nsight Compute GUI.**
+
+**Key metrics:**
+
+**SM Efficiency:**
+- Percentage of time SMs are actively computing
+- Target: >80%
+- Low? Check occupancy or warp utilization
+
+**Occupancy:**
+- Percentage of GPU resources utilized
+- Target: >50% (not always higher is better)
+- Low? Register or shared memory pressure
+
+**Memory Throughput:**
+- Bytes/second vs. theoretical peak
+- Target: >70% for memory-bound kernels
+- Low? Memory access pattern issues (coalescing)
+
+**Example output:**
+```
+Kernel: flash_attention_forward
+Duration: 2.34 ms
+SM Efficiency: 45.2%  ← Could be better
+Occupancy: 31.2%      ← Low! Register pressure?
+Memory Throughput: 1.2 TB/s (85% of peak) ← Good
+```
+
+**Interpretation:**
+- High memory throughput (85%) - memory access pattern is good
+- Low occupancy (31%) - using too many registers?
+- Low SM efficiency - might be waiting on memory despite good throughput
+
+**Action:** Reduce register usage or shared memory usage to increase occupancy.
+
+### Roofline Analysis in Nsight
+
+Nsight Compute can generate roofline plots:
+
+```bash
+ncu --metrics sm__sass_average_data_bytes_per_sector_mem_global_op_ld.pct,\
+sm__sass_average_data_bytes_per_sector_mem_global_op_st.pct \
+python train.py
+```
+
+Shows kernel position on roofline:
+- Below roofline: Optimization opportunity
+- On roofline: Near-optimal for arithmetic intensity
+
+## PyTorch Profiler
+
+PyTorch has built-in profiling for Python and GPU.
+
+```python
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+model = MyModel().cuda()
+inputs = torch.randn(32, 3, 224, 224).cuda()
+
+with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    record_shapes=True,
+    with_stack=True
+) as prof:
+    model(inputs)
+
+# Print summary
+print(prof.key_averages().table(sort_by="cuda_time_total"))
+
+# Export for TensorBoard
+prof.export_chrome_trace("trace.json")
+```
+
+**Output:**
+```
+---------------------------------  ------------  ------------  --------
+Name                               CPU time      CUDA time     Calls
+---------------------------------  ------------  ------------  --------
+aten::conv2d                       5.234ms       45.678ms      16
+aten::batch_norm                   2.123ms       12.345ms      16
+aten::relu                         0.456ms       3.456ms       16
+```
+
+**TensorBoard visualization:**
+```bash
+tensorboard --logdir=./logs
+```
+
+Shows timeline similar to Nsight Systems but with PyTorch op granularity.
+
+### Finding Data Movement Issues
+
+```python
+with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    profile_memory=True
+) as prof:
+    model(inputs)
+
+print(prof.key_averages().table(
+    sort_by="self_cuda_memory_usage",
+    row_limit=10
+))
+```
+
+Shows which ops allocate the most memory.
+
+## Flame Graphs
+
+Flame graphs visualize call stacks from profiling data.
+
+### Generating Flame Graphs
+
+```bash
+# Record with perf
+perf record -F 99 -a -g -- sleep 30
+
+# Convert to flame graph
+perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
+```
+
+**Reading flame graphs:**
+- X-axis: Alphabetical order (NOT time!)
+- Y-axis: Call stack depth
+- Width: Time spent in that function
+- Color: Random (for differentiation)
+
+**What to look for:**
+- Wide plateaus at top = hotspots
+- Tall towers = deep call stacks (recursion or abstraction layers)
+
+**Example interpretation:**
+
+```
+┌─────────────────────────────────────────────┐
+│              main                            │ 100%
+├────────────┬──────────────┬─────────────────┤
+│ forward()  │ backward()   │ optimizer.step()│
+│   40%      │   45%        │    15%          │
+├──────┬─────┼──────┬───────┼─────────────────┤
+│matmul│norm │matmul│softmax│                 │
+│ 30%  │ 10% │ 35%  │ 10%  │                 │
+```
+
+**Insight**: `matmul` in backward (35%) is the biggest single hotspot.
+
+## Common Profiling Mistakes
+
+### Mistake 1: Profiling Debug Builds
+
+```bash
+# DON'T
+gcc -g -O0 my_program.c && perf record ./a.out
+
+# DO
+gcc -O3 -g my_program.c && perf record ./a.out
+```
+
+Always profile optimized builds with debug symbols (`-O3 -g`).
+
+### Mistake 2: Too-Short Runs
+
+```python
+# DON'T - noise dominates
+for _ in range(10):
+    model(input)
+
+# DO - enough samples for significance
+for _ in range(1000):
+    model(input)
+```
+
+Profile long enough that variance is <5%.
+
+### Mistake 3: Profiling Different Code Paths
+
+```python
+# DON'T - comparing apples to oranges
+if use_optimized:
+    result = fast_path(x)
+else:
+    result = slow_path(x)  # Different algorithm!
+```
+
+Profile the **same** algorithm before/after optimization.
+
+### Mistake 4: Ignoring Variance
+
+```bash
+# Single run - could be luck
+perf stat ./my_program
+
+# Better - 10 runs, report median and stddev
+for i in {1..10}; do perf stat ./my_program 2>&1; done | grep "time elapsed"
+```
+
+Report distributions, not single numbers.
+
+### Mistake 5: Profile-Driven Development
+
+Profiling should **inform** optimization, not **drive** it.
+
+**Bad workflow:**
+1. Profile
+2. Optimize hottest function
+3. Repeat
+
+**Good workflow:**
+1. Understand what should be fast (theory)
+2. Profile to see what actually is slow
+3. Form hypothesis about why
+4. Optimize based on hypothesis
+5. Profile to verify
+
+## Memory Profiling
+
+### Cachegrind (Valgrind)
+
+Simulates cache hierarchy and counts misses.
+
+```bash
+valgrind --tool=cachegrind ./my_program
+```
+
+Output:
+```
+==12345== I   refs:      100,000,000
+==12345== I1  misses:          1,234
+==12345== LLi misses:            567
+==12345== I1  miss rate:        0.00%
+==12345== LLi miss rate:        0.00%
+==12345==
+==12345== D   refs:       50,000,000
+==12345== D1  misses:      1,234,567  (1,000,000 rd + 234,567 wr)
+==12345== LLd misses:        234,567  (  200,000 rd +  34,567 wr)
+==12345== D1  miss rate:         2.5%
+==12345== LLd miss rate:        0.5%
+```
+
+**Warning**: Valgrind is **slow** (10-50× overhead). Use for understanding, not benchmarking.
+
+### heaptrack (Heap Allocations)
+
+Tracks memory allocations over time.
+
+```bash
+heaptrack ./my_program
+heaptrack_gui heaptrack.my_program.12345.gz
+```
+
+Shows:
+- Peak memory usage
+- Allocation hotspots
+- Leaks
+
+## Production Profiling
+
+### Continuous Profiling
+
+Tools like `pprof` (Google), Pyroscope, or Datadog enable profiling in production.
+
+**Why important:**
+- Synthetic benchmarks miss real workloads
+- Performance issues emerge over time
+- Different code paths in production
+
+**Example with pprof (Go):**
+```go
+import _ "net/http/pprof"
+
+go func() {
+    log.Println(http.ListenAndServe("localhost:6060", nil))
+}()
+```
+
+Access profiles at http://localhost:6060/debug/pprof/
+
+**For Python (py-spy):**
+```bash
+# Profile running Python process
+sudo py-spy record -o profile.svg --pid 12345 --duration 60
+```
+
+### Sampling Strategy
+
+**Development**: High frequency (1000 Hz+), short runs
+**Staging**: Medium frequency (100-500 Hz), realistic workloads
+**Production**: Low frequency (10-99 Hz), continuous
+
+The "99 Hz rule": Prime number avoids aliasing with periodic events.
+
+## Statistical Significance
+
+### Measuring Variance
+
+```bash
+# Run benchmark 30 times
+for i in {1..30}; do
+    /usr/bin/time -f "%e" ./my_program 2>&1 | tail -1
+done > times.txt
+
+# Calculate mean and stddev
+awk '{sum+=$1; sumsq+=$1*$1} END {
+    mean=sum/NR;
+    stddev=sqrt(sumsq/NR - mean*mean);
+    printf "Mean: %.3f\nStddev: %.3f\nCoV: %.1f%%\n",
+           mean, stddev, 100*stddev/mean
+}' times.txt
+```
+
+**Coefficient of Variation (CoV):** stddev / mean
+- CoV < 5%: Good, trustworthy
+- CoV 5-10%: Moderate, run more samples
+- CoV > 10%: High variance, investigate why
+
+### Comparing Optimizations
+
+Is the speedup real or noise?
+
+**Use t-test or Mann-Whitney U test:**
+
+```python
+from scipy import stats
+
+baseline = [2.31, 2.34, 2.29, 2.33, 2.32]  # seconds
+optimized = [1.98, 2.01, 1.99, 2.02, 2.00]
+
+# Mann-Whitney U test (non-parametric)
+statistic, p_value = stats.mannwhitneyu(baseline, optimized)
+
+if p_value < 0.05:
+    print(f"Speedup is statistically significant (p={p_value:.4f})")
+    print(f"Median speedup: {np.median(baseline) / np.median(optimized):.2f}×")
+else:
+    print(f"No significant difference (p={p_value:.4f})")
+```
+
+**Rule**: Only claim speedup if p < 0.05 (95% confidence).
+
+## Profiling Workflow
+
+### The Six-Step Process
+
+1. **Establish Baseline**
+   ```bash
+   for i in {1..10}; do perf stat ./program; done > baseline.txt
+   ```
+
+2. **Profile Hotspots**
+   ```bash
+   perf record -g ./program
+   perf report
+   ```
+
+3. **Form Hypothesis**
+   "Function X is slow because it's cache-misses"
+
+4. **Verify Hypothesis**
+   ```bash
+   perf stat -e cache-misses -g ./program
+   ```
+
+5. **Optimize**
+   Change code based on hypothesis
+
+6. **Measure Impact**
+   ```bash
+   for i in {1..10}; do perf stat ./program_optimized; done > optimized.txt
+   # Compare with statistical test
+   ```
+
+## Tools Cheat Sheet
+
+| Task | CPU Tool | GPU Tool | Overhead |
+|------|----------|----------|----------|
+| Hotspots | `perf record -g` | Nsight Systems | Low |
+| Cache misses | `perf stat -e cache-misses` | - | Very low |
+| Kernel analysis | - | Nsight Compute | High |
+| Memory allocations | heaptrack | Nsight Systems | Medium |
+| Timeline | `perf record -e sched:*` | Nsight Systems | Medium |
+| Production | py-spy, pprof | - | Very low |
+| Detailed assembly | `perf annotate` | Nsight Compute (SASS) | - |
+
+## Connections
+
+**Chapter 1 (Memory Hierarchy)**: Profilers reveal cache misses that validate the hierarchy model.
+
+**Chapter 2 (Bandwidth)**: Memory throughput metrics in Nsight confirm bandwidth bounds.
+
+**Chapter 15 (Measurement)**: This chapter provides the tools for the measurement methodology.
+
+**Chapter 16 (Hypothesis)**: Profiling data forms the basis for performance hypotheses.
+
+## Key Takeaways
+
+1. **Profile optimized code**: Debug builds are misleading.
+
+2. **Sample wisely**: 99-1000 Hz depending on environment. Higher isn't always better.
+
+3. **Measure variance**: Report median ± stddev, not single runs.
+
+4. **Use hardware counters**: Cache misses, branch mispredicts, IPC reveal bottlenecks.
+
+5. **GPU timeline first, kernel details second**: Nsight Systems before Nsight Compute.
+
+6. **Statistical significance matters**: p < 0.05 or the speedup might be noise.
+
+7. **Profile informs, theory guides**: Don't optimize blindly based on hotspots.
+
+---
+
+::: {.callout-tip}
+## Profiler Learning Path
+
+**Week 1**: Master `perf stat` and `perf record`
+**Week 2**: Learn PyTorch profiler + TensorBoard
+**Week 3**: Nsight Systems basics
+**Week 4**: Nsight Compute for kernel optimization
+**Week 5**: Statistical analysis of results
+
+By week 5, you'll be profiling like a pro.
+:::
+
+---
+
+## Further Reading
+
+- Brendan Gregg's "Systems Performance" - comprehensive profiler reference
+- `perf` documentation: https://perf.wiki.kernel.org/
+- Nsight documentation: https://developer.nvidia.com/nsight-systems
+- PyTorch profiler tutorial: https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html
+
+---

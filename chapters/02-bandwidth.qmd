@@ -2,6 +2,8 @@
 title: "Thinking in Bandwidth"
 subtitle: "Why Moving Data Often Costs More Than Computing"
 id: sec-bandwidth
+---
+
 ::: {.chapter-opener}
 An H100 GPU can perform 2,000 trillion operations per second. It can move 3 trillion bytes per second from memory. That's 667 operations per byte. If your algorithm does fewer than ~100 operations per byte, you're not computing—you're waiting.
 

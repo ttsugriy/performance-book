@@ -324,4 +324,4 @@ The notebook for this chapter lets you:
 
 ---
 
-[**Next: The Tyranny of Bandwidth →**](02-bandwidth-tyranny.qmd)
+[**Next: The Tyranny of Bandwidth →**](02-bandwidth.qmd)
