@@ -1,0 +1,420 @@
+---
+title: "Fusion"
+subtitle: "When Combining Operations Beats Separating Them"
+id: sec-fusion
+---
+
+::: {.chapter-opener}
+Every memory round-trip has a cost. If you write to memory just to read it back, you've paid twice for nothing.
+
+Fusion eliminates these round-trips by combining operations into a single pass.
+:::
+
+## The Hidden Cost of Abstraction
+
+Modern deep learning frameworks provide beautiful abstractions:
+
+```python
+def layer(x):
+    x = linear(x)
+    x = relu(x)
+    x = dropout(x)
+    return x
+```
+
+Clean, readable, modular. Each operation is a separate function.
+
+But at runtime, this beautiful code has an ugly secret:
+
+```
+Kernel 1 (linear):  Read x from HBM → Compute Wx+b → Write result to HBM
+Kernel 2 (relu):    Read from HBM → max(0, x) → Write to HBM
+Kernel 3 (dropout): Read from HBM → mask → Write to HBM
+```
+
+Three round-trips to HBM. For an H100 at 3 TB/s bandwidth and 80GB HBM, each round-trip costs microseconds. These add up.
+
+The computation is trivial—multiply, compare, mask. The memory traffic is expensive.
+
+## What Is Fusion?
+
+Fusion combines multiple operations into a single kernel:
+
+```
+Fused kernel: Read x from HBM → Wx+b → relu → dropout → Write to HBM
+```
+
+One read, one write. The intermediates stay in registers or shared memory, never touching HBM.
+
+**The benefit scales with arithmetic intensity.** Operations with low arithmetic intensity (element-wise, small reductions) benefit most because memory traffic dominates their runtime.
+
+## When Fusion Helps
+
+Not all operations benefit equally from fusion.
+
+### High Benefit: Element-wise Chains
+
+```python
+y = torch.sigmoid(x) * torch.tanh(x + 1)
+```
+
+Without fusion: 4 memory round-trips (read x twice, write twice)
+With fusion: 1 read, 1 write
+
+Speedup: often 3-4× or more.
+
+### High Benefit: Small Reductions Following Compute
+
+```python
+loss = F.cross_entropy(logits, labels)
+```
+
+Cross-entropy computes softmax then log then reduction. Fusing prevents materializing the softmax probabilities.
+
+### Moderate Benefit: LayerNorm and Softmax
+
+```python
+x = F.layer_norm(x, normalized_shape)
+```
+
+LayerNorm computes mean, variance, normalization, and affine transform. Fusing keeps statistics in registers.
+
+### Low Benefit: Large Matrix Multiplies
+
+```python
+y = x @ W
+```
+
+Matrix multiply already has high arithmetic intensity. It's compute-bound, not memory-bound. Fusion helps the operations *around* matmul, not matmul itself.
+
+## The Fusion Hierarchy
+
+Fusion can happen at different levels:
+
+### Level 1: Manual Fused Kernels
+
+Hand-written CUDA kernels combining specific operations:
+
+```cuda
+__global__ void fused_linear_relu(float* output, float* input,
+                                   float* weight, float* bias, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        float val = 0;
+        for (int j = 0; j < d; j++) {
+            val += input[j] * weight[idx * d + j];
+        }
+        val += bias[idx];
+        output[idx] = val > 0 ? val : 0;  // ReLU fused in
+    }
+}
+```
+
+**Pros**: Maximum control, maximum performance.
+**Cons**: Combinatorial explosion of kernel variants. Can't fuse arbitrary combinations.
+
+### Level 2: Pattern-Based Fusion
+
+Frameworks recognize common patterns and use pre-fused kernels:
+
+```python
+# PyTorch recognizes this pattern
+x = F.linear(x, weight, bias)
+x = F.relu(x)
+# May be fused automatically
+```
+
+**Pros**: Transparent to user, no code changes.
+**Cons**: Limited to recognized patterns.
+
+### Level 3: JIT Compilation (torch.compile)
+
+Compilers analyze the computation graph and fuse automatically:
+
+```python
+@torch.compile
+def layer(x):
+    x = F.linear(x, weight, bias)
+    x = F.relu(x)
+    x = F.dropout(x, p=0.1)
+    return x
+```
+
+The compiler traces execution, builds a graph, and generates fused kernels.
+
+**Pros**: Works with arbitrary code, finds fusion opportunities automatically.
+**Cons**: Compilation overhead, potential for unexpected behavior.
+
+## torch.compile Deep Dive
+
+PyTorch 2.0 introduced `torch.compile`, a JIT compiler that automatically applies fusion and other optimizations.
+
+### How It Works
+
+```python
+@torch.compile
+def my_function(x, y):
+    z = x + y
+    return torch.relu(z)
+```
+
+1. **Tracing**: TorchDynamo captures the Python bytecode and extracts a computation graph
+2. **Graph capture**: Operations are recorded into an FX graph
+3. **Optimization**: TorchInductor applies fusion and generates Triton kernels
+4. **Code generation**: Optimized kernels are compiled and cached
+
+### Fusion in Action
+
+```python
+import torch
+
+def unfused(x):
+    x = x + 1
+    x = x * 2
+    x = torch.relu(x)
+    return x
+
+fused = torch.compile(unfused)
+
+x = torch.randn(10000, device='cuda')
+
+# First call: compilation happens
+y = fused(x)
+
+# Subsequent calls: use cached fused kernel
+y = fused(x)  # Fast
+```
+
+### What Gets Fused?
+
+torch.compile typically fuses:
+
+- Chains of element-wise operations
+- Normalization layers (LayerNorm, BatchNorm, RMSNorm)
+- Softmax and cross-entropy
+- Pointwise operations following matmul (bias + activation)
+
+### What Doesn't Fuse?
+
+- Large matrix multiplies (already efficient, use cuBLAS/cuDNN)
+- Operations with data-dependent control flow
+- Custom CUDA extensions (unless wrapped appropriately)
+
+## The Limits of Fusion
+
+Fusion isn't always beneficial.
+
+### Memory Limits
+
+Fused kernels need registers and shared memory for intermediates. Very long fusion chains may spill to local memory, negating benefits.
+
+### Register Pressure
+
+Each additional operation in a fused kernel requires registers. At some point, the GPU runs out:
+
+```python
+# This might not fuse well due to register pressure
+def many_ops(x):
+    for i in range(20):
+        x = x * 2 + 1
+        x = torch.sin(x) + torch.cos(x)
+    return x
+```
+
+### Compilation Overhead
+
+torch.compile has upfront cost:
+
+- First call: 100ms to several seconds
+- Cached calls: near-zero overhead
+
+For short-running programs or highly dynamic code, compilation may not pay off.
+
+### Dynamic Shapes
+
+Varying tensor shapes can trigger recompilation:
+
+```python
+@torch.compile
+def process(x):
+    return x.sum(dim=-1)
+
+# Each new shape may trigger recompilation
+process(torch.randn(100, 50, device='cuda'))
+process(torch.randn(200, 100, device='cuda'))  # Recompile?
+```
+
+Use `dynamic=True` or padding to mitigate.
+
+## Fusion and the Memory Hierarchy
+
+Fusion is fundamentally about the memory hierarchy. Let's trace an example:
+
+### Without Fusion
+
+```python
+def unfused_attention_output(attn_weights, v, residual):
+    # Kernel 1: matmul
+    attn_out = attn_weights @ v  # Read attn_weights, v; Write attn_out to HBM
+
+    # Kernel 2: residual add
+    out = attn_out + residual    # Read attn_out, residual; Write out to HBM
+
+    # Kernel 3: layer norm
+    out = F.layer_norm(out, ...)  # Read out; Write normalized to HBM
+
+    return out
+```
+
+Memory traffic: attn_out written once, read once (2 passes). Same for intermediate.
+
+### With Fusion
+
+```python
+@torch.compile
+def fused_attention_output(attn_weights, v, residual):
+    attn_out = attn_weights @ v
+    out = attn_out + residual
+    out = F.layer_norm(out, ...)
+    return out
+```
+
+The compiler may fuse the residual add and layer norm:
+
+```
+Kernel 1: matmul (uses optimized cuBLAS, writes to HBM)
+Kernel 2 (fused): Read matmul output + residual → add → layernorm → Write final output
+```
+
+One fewer round-trip.
+
+## Practical Guidance
+
+### When to Use torch.compile
+
+```python
+# Good candidates for torch.compile:
+
+# 1. Inference on fixed shapes
+@torch.compile(mode="reduce-overhead")
+def inference(x):
+    return model(x)
+
+# 2. Training loops with stable shapes
+model = torch.compile(model)
+
+# 3. Custom loss functions with many small ops
+@torch.compile
+def custom_loss(pred, target):
+    # Many element-wise operations that benefit from fusion
+    ...
+```
+
+### When to Avoid
+
+```python
+# Bad candidates:
+
+# 1. Highly dynamic control flow
+def dynamic_model(x):
+    if x.sum() > 0:  # Data-dependent branch
+        return path_a(x)
+    else:
+        return path_b(x)
+
+# 2. Very short functions (compilation cost > runtime benefit)
+@torch.compile
+def tiny(x):
+    return x + 1  # Probably not worth it
+
+# 3. Development/debugging (compilation hides errors)
+```
+
+### Measuring Fusion Impact
+
+```python
+import torch
+import time
+
+def benchmark(fn, x, n_warmup=10, n_iter=100):
+    for _ in range(n_warmup):
+        fn(x)
+    torch.cuda.synchronize()
+
+    start = time.perf_counter()
+    for _ in range(n_iter):
+        fn(x)
+    torch.cuda.synchronize()
+
+    return (time.perf_counter() - start) / n_iter * 1000  # ms
+
+x = torch.randn(4096, 4096, device='cuda')
+
+def chain(x):
+    x = x + 1
+    x = x * 2
+    x = torch.relu(x)
+    x = x ** 2
+    return x
+
+compiled = torch.compile(chain)
+
+print(f"Eager:    {benchmark(chain, x):.3f} ms")
+print(f"Compiled: {benchmark(compiled, x):.3f} ms")
+# Typical result: 2-4× speedup
+```
+
+## Fusion in FlashAttention
+
+FlashAttention is the ultimate fusion example. It fuses the entire attention computation:
+
+```
+Standard:
+  S = Q @ K.T    → Write S to HBM (n² elements)
+  P = softmax(S) → Write P to HBM (n² elements)
+  O = P @ V      → Write O to HBM (n×d elements)
+
+FlashAttention:
+  [Fused kernel]: Read Q, K, V → Compute everything in SRAM → Write O only
+```
+
+The "fusion" here is extreme: all intermediates stay in SRAM, never touching HBM. This is why FlashAttention is faster despite doing more compute (the streaming softmax corrections).
+
+## Connections
+
+**Chapter 2 (Bandwidth)**: Fusion reduces memory traffic, addressing the bandwidth bottleneck.
+
+**Chapter 7 (Locality)**: Fusion improves temporal locality—data is reused before eviction from registers/cache.
+
+**Chapter 11 (FlashAttention)**: The ultimate example of fusion principles applied to attention.
+
+## Key Takeaways
+
+1. **Fusion eliminates memory round-trips**: Every intermediate written to HBM and read back is a cost that fusion can avoid.
+
+2. **Low arithmetic intensity operations benefit most**: Element-wise ops, small reductions, normalization layers.
+
+3. **torch.compile automates fusion**: For most code, `@torch.compile` is the easiest way to get fusion benefits.
+
+4. **Manual fusion still matters**: For maximum performance (like FlashAttention), hand-written fused kernels remain important.
+
+5. **Fusion has limits**: Register pressure, compilation overhead, and dynamic shapes all constrain what can be fused.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Measure fusion speedups on element-wise chains
+- Compare eager vs. compiled execution
+- Visualize what torch.compile fuses
+- Profile memory traffic with and without fusion
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/08-fusion.ipynb)
+:::
+
+---
+
+[**← Previous: Locality**](07-locality.qmd) | [**Next: Matrix Multiply Investigation →**](10-matrix-multiply.qmd)

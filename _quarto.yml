@@ -25,6 +25,7 @@ book:
         - chapters/05-factoring.qmd
         - chapters/06-skipping.qmd
         - chapters/07-locality.qmd
+        - chapters/08-fusion.qmd
     - part: "Part III: The Investigations"
       chapters:
         - chapters/10-matrix-multiply.qmd
