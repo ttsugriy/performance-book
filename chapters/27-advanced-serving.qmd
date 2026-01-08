@@ -615,6 +615,403 @@ class ModelRouter:
         return min(score, 1.0)
 ```
 
+## vLLM Internals
+
+### Architecture Overview
+
+vLLM is the most widely-deployed open-source LLM serving engine. Understanding its internals helps optimize production deployments.
+
+```
+vLLM Architecture:
+
+┌─────────────────────────────────────────────────────────┐
+│                   API Server (FastAPI)                  │
+├─────────────────────────────────────────────────────────┤
+│                   LLM Engine                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │  Scheduler  │  │ KV Cache    │  │ Model Executor  │  │
+│  │             │  │ Manager     │  │                 │  │
+│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+├─────────────────────────────────────────────────────────┤
+│                   Worker (per GPU)                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │ Model       │  │ PagedAttention│ │ Sampler        │  │
+│  │ Runner      │  │ Kernels     │  │                 │  │
+│  └─────────────┘  └─────────────┘  └─────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### The Scheduler Deep Dive
+
+vLLM's scheduler makes critical decisions every iteration:
+
+```python
+class vLLMScheduler:
+    """
+    Simplified vLLM scheduler logic.
+    """
+    def __init__(self, config):
+        self.waiting = deque()      # Requests waiting to start
+        self.running = deque()      # Requests currently generating
+        self.swapped = deque()      # Requests swapped to CPU
+        self.block_manager = BlockManager(config)
+
+    def schedule(self):
+        """
+        Core scheduling loop, called every iteration.
+        """
+        # Step 1: Try to resume swapped requests
+        resumed = self._try_resume_swapped()
+
+        # Step 2: Preempt if out of memory
+        if self._is_oom():
+            self._preempt_requests()
+
+        # Step 3: Admit new requests
+        admitted = self._admit_waiting()
+
+        # Step 4: Build batch for this iteration
+        batch = SchedulerOutputs(
+            scheduled_running=list(self.running),
+            scheduled_prefill=admitted,
+            blocks_to_swap_in=resumed,
+            blocks_to_swap_out=preempted,
+        )
+
+        return batch
+
+    def _admit_waiting(self):
+        """Admit waiting requests if we have memory."""
+        admitted = []
+
+        for seq_group in list(self.waiting):
+            # Calculate memory needed
+            num_required_blocks = self._get_required_blocks(seq_group)
+
+            if self.block_manager.can_allocate(num_required_blocks):
+                self.block_manager.allocate(seq_group, num_required_blocks)
+                self.waiting.remove(seq_group)
+                self.running.append(seq_group)
+                admitted.append(seq_group)
+            else:
+                break  # Can't fit more
+
+        return admitted
+
+    def _preempt_requests(self):
+        """Preempt lowest priority requests when OOM."""
+        # Sort by priority, preempt lowest first
+        sorted_running = sorted(self.running, key=lambda x: x.priority)
+
+        for seq_group in sorted_running:
+            if not self._is_oom():
+                break
+
+            # Swap KV cache to CPU
+            self.block_manager.swap_out(seq_group)
+            self.running.remove(seq_group)
+            self.swapped.append(seq_group)
+```
+
+### PagedAttention Memory Management
+
+vLLM's block allocator manages GPU memory like an OS manages RAM:
+
+```python
+class BlockManager:
+    """
+    Manages KV cache memory in fixed-size blocks.
+    """
+    def __init__(self, block_size=16, num_gpu_blocks=1000, num_cpu_blocks=500):
+        self.block_size = block_size
+
+        # GPU block pool
+        self.gpu_free_blocks = list(range(num_gpu_blocks))
+        self.gpu_allocated = {}  # seq_id -> [block_ids]
+
+        # CPU block pool (for swapping)
+        self.cpu_free_blocks = list(range(num_cpu_blocks))
+        self.cpu_allocated = {}
+
+    def allocate(self, seq_group, num_blocks):
+        """Allocate blocks for a sequence group."""
+        if len(self.gpu_free_blocks) < num_blocks:
+            raise OOMError("Not enough GPU blocks")
+
+        blocks = [self.gpu_free_blocks.pop() for _ in range(num_blocks)]
+        self.gpu_allocated[seq_group.id] = blocks
+        return blocks
+
+    def append_slots(self, seq_group, num_tokens):
+        """
+        Allocate additional slots as sequence grows.
+        Called when generating new tokens.
+        """
+        blocks = self.gpu_allocated[seq_group.id]
+        current_slots = len(blocks) * self.block_size
+
+        if seq_group.num_tokens + num_tokens > current_slots:
+            # Need new block
+            if not self.gpu_free_blocks:
+                return None  # Trigger preemption
+            new_block = self.gpu_free_blocks.pop()
+            blocks.append(new_block)
+
+        return blocks
+
+    def swap_out(self, seq_group):
+        """Swap KV cache from GPU to CPU."""
+        gpu_blocks = self.gpu_allocated.pop(seq_group.id)
+
+        # Get CPU blocks
+        cpu_blocks = [self.cpu_free_blocks.pop() for _ in gpu_blocks]
+
+        # Actual copy happens in worker
+        self.cpu_allocated[seq_group.id] = {
+            'cpu_blocks': cpu_blocks,
+            'gpu_blocks': gpu_blocks,  # Remember for swap_in
+        }
+
+        # Return GPU blocks to pool
+        self.gpu_free_blocks.extend(gpu_blocks)
+
+        return (gpu_blocks, cpu_blocks)  # Copy mapping
+
+    def swap_in(self, seq_group):
+        """Swap KV cache from CPU back to GPU."""
+        info = self.cpu_allocated.pop(seq_group.id)
+        cpu_blocks = info['cpu_blocks']
+
+        # Get fresh GPU blocks
+        gpu_blocks = [self.gpu_free_blocks.pop() for _ in cpu_blocks]
+        self.gpu_allocated[seq_group.id] = gpu_blocks
+
+        # Return CPU blocks to pool
+        self.cpu_free_blocks.extend(cpu_blocks)
+
+        return (cpu_blocks, gpu_blocks)  # Copy mapping
+```
+
+### Key vLLM Configuration Options
+
+```python
+from vllm import LLM, SamplingParams
+
+# Memory optimization
+llm = LLM(
+    model="meta-llama/Llama-2-70b-chat-hf",
+
+    # Memory management
+    gpu_memory_utilization=0.90,  # Use 90% of GPU memory for KV cache
+    swap_space=16,  # GB of CPU memory for swapping
+
+    # Scheduling
+    max_num_seqs=256,  # Max concurrent sequences
+    max_num_batched_tokens=4096,  # Max tokens per iteration
+
+    # Parallelism
+    tensor_parallel_size=4,  # Distribute across 4 GPUs
+    pipeline_parallel_size=1,
+
+    # Quantization
+    quantization="awq",  # or "gptq", "squeezellm"
+
+    # KV cache optimization
+    kv_cache_dtype="fp8_e5m2",  # FP8 KV cache (Hopper+)
+    block_size=16,
+
+    # Prefix caching
+    enable_prefix_caching=True,
+)
+```
+
+## SGLang: Structured Generation
+
+### Beyond Text Generation
+
+SGLang extends LLM serving with structured outputs and control flow:
+
+```python
+import sglang as sgl
+
+# Define structured program
+@sgl.function
+def extract_info(s, text):
+    s += "Extract information from: " + text + "\n\n"
+
+    s += "Name: "
+    s += sgl.gen("name", stop="\n")
+
+    s += "Age: "
+    s += sgl.gen("age", stop="\n", regex=r"\d+")
+
+    s += "Email: "
+    s += sgl.gen("email", stop="\n", regex=r"[\w\.-]+@[\w\.-]+\.\w+")
+
+    return {"name": s["name"], "age": s["age"], "email": s["email"]}
+
+# Execute with RadixAttention
+result = extract_info.run(text="John Smith, 35, john@example.com")
+```
+
+### Constrained Decoding
+
+SGLang enforces output structure during generation:
+
+```python
+@sgl.function
+def json_generation(s, schema):
+    """Generate JSON matching a schema."""
+    s += "Generate a JSON object matching this schema:\n"
+    s += str(schema) + "\n\n"
+
+    # Constrained generation - only valid JSON tokens allowed
+    s += sgl.gen("json",
+        json_schema=schema,
+        max_tokens=500
+    )
+
+    return json.loads(s["json"])
+
+# Schema enforcement
+schema = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "scores": {"type": "array", "items": {"type": "number"}}
+    },
+    "required": ["name", "scores"]
+}
+
+result = json_generation.run(schema=schema)
+# Guaranteed to be valid JSON matching schema!
+```
+
+### Fork and Join
+
+SGLang supports parallel generation paths:
+
+```python
+@sgl.function
+def multi_perspective(s, question):
+    s += f"Question: {question}\n\n"
+
+    # Fork into multiple perspectives
+    fork_results = []
+
+    perspectives = ["optimist", "pessimist", "realist"]
+
+    for perspective in perspectives:
+        with sgl.fork(s) as fork:
+            fork += f"Answer as a {perspective}:\n"
+            fork += sgl.gen(f"answer_{perspective}", max_tokens=100)
+            fork_results.append(fork[f"answer_{perspective}"])
+
+    # Join: Synthesize perspectives
+    s += "\nSynthesis of all perspectives:\n"
+    for p, r in zip(perspectives, fork_results):
+        s += f"- {p}: {r}\n"
+
+    s += "\nFinal balanced answer:\n"
+    s += sgl.gen("final", max_tokens=200)
+
+    return s["final"]
+```
+
+### RadixAttention in Detail
+
+SGLang's RadixAttention implementation:
+
+```python
+class SGLangRadixCache:
+    """
+    Production-grade RadixAttention implementation.
+    """
+    def __init__(self, max_total_tokens=100_000):
+        self.root = RadixNode()
+        self.max_tokens = max_total_tokens
+        self.current_tokens = 0
+        self.lock = threading.Lock()
+
+    def match_prefix(self, input_ids: List[int]) -> Tuple[int, List[KVCache]]:
+        """
+        Find longest matching prefix in O(n) time.
+
+        Returns:
+            matched_length: Number of tokens matched
+            kv_caches: KV cache for matched prefix
+        """
+        with self.lock:
+            node = self.root
+            matched = 0
+            kv_caches = []
+
+            for token in input_ids:
+                if token in node.children:
+                    child = node.children[token]
+                    node = child
+                    matched += 1
+                    if child.kv_cache is not None:
+                        kv_caches.append(child.kv_cache)
+                else:
+                    break
+
+            # Update access time for LRU
+            self._update_access(node)
+
+            return matched, kv_caches
+
+    def insert(self, input_ids: List[int], kv_cache: KVCache):
+        """Insert new prefix into cache."""
+        with self.lock:
+            # Evict if necessary
+            cache_size = self._estimate_size(kv_cache)
+            while self.current_tokens + len(input_ids) > self.max_tokens:
+                self._evict_lru()
+
+            # Insert
+            node = self.root
+            for i, token in enumerate(input_ids):
+                if token not in node.children:
+                    node.children[token] = RadixNode()
+                node = node.children[token]
+
+                # Store KV cache at final position
+                if i == len(input_ids) - 1:
+                    node.kv_cache = kv_cache
+
+            self.current_tokens += len(input_ids)
+
+    def _evict_lru(self):
+        """Evict least recently used prefix."""
+        # Find LRU leaf node
+        lru_node, lru_parent, lru_token = self._find_lru_leaf()
+
+        if lru_node is not None:
+            tokens_freed = lru_node.depth
+            self.current_tokens -= tokens_freed
+            del lru_parent.children[lru_token]
+```
+
+### Performance Benefits
+
+```
+Benchmark: 1000 requests with shared system prompt
+
+Without RadixAttention (vLLM PagedAttention only):
+  - Prefill per request: 1000 tokens
+  - Total prefill: 1,000,000 tokens
+  - Time: 45 seconds
+
+With RadixAttention (SGLang):
+  - First request prefill: 1000 tokens
+  - Subsequent prefills: 50 tokens (unique part only)
+  - Total prefill: 1000 + 999*50 = 50,950 tokens
+  - Time: 4.2 seconds
+
+Speedup: 10.7x
+```
+
 ## Key Takeaways
 
 1. **Prefix caching**: Amortize common prefixes across requests for 10x+ speedup.
@@ -629,7 +1026,11 @@ class ModelRouter:
 
 6. **Multi-model**: Efficient LoRA serving and model multiplexing.
 
-7. **Observability**: Track TTFT, TPOT, throughput, cache hits for optimization.
+7. **vLLM internals**: Understand PagedAttention block allocation and scheduler for tuning.
+
+8. **SGLang**: Structured generation with RadixAttention for maximum prefix reuse.
+
+9. **Observability**: Track TTFT, TPOT, throughput, cache hits for optimization.
 
 ::: {.callout-note}
 ## Try It Yourself
@@ -647,6 +1048,9 @@ The accompanying notebook lets you:
 ## Further Reading
 
 - Zheng et al. (2023). "SGLang: Efficient Execution of Structured Language Model Programs"
+- Kwon et al. (2023). "Efficient Memory Management for Large Language Model Serving with PagedAttention"
+- [vLLM Documentation](https://docs.vllm.ai/)
+- [SGLang Documentation](https://sgl-project.github.io/)
 - Agrawal et al. (2024). "Sarathi: Efficient LLM Inference by Piggybacking Decodes with Chunked Prefills"
 - Cai et al. (2024). "Medusa: Simple Framework for Accelerating LLM Generation with Multiple Decoding Heads"
 - Li et al. (2024). "EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty"
