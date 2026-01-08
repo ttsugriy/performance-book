@@ -1,6 +1,6 @@
-# The Nature of Fast
+# The Algebra of Speed
 
-**Investigations in Computational Performance**
+**Mathematical Foundations of Computational Performance**
 
 An interactive, open-source book about understanding why code runs fast or slow—grounded in mathematics, aware of hardware, and focused on building intuition rather than memorizing tricks.
 
@@ -72,20 +72,39 @@ quarto render
 # Output is in _site/
 ```
 
-## 📚 Structure
+## 📚 Book Structure
 
-```
-performance-book/
-├── chapters/              # Book chapters (.qmd files)
-├── interactives/          # Observable JS visualizations
-├── notebooks/
-│   ├── tier1-conceptual/  # JupyterLite compatible
-│   ├── tier2-experimental/# Colab/Kaggle (GPU)
-│   └── tier3-advanced/    # Serious benchmarking
-├── code/                  # Standalone code
-├── figures/               # Static figures
-└── results/               # Pre-computed reference results
-```
+**18 chapters organized into 4 parts:**
+
+**Part I: The Hardware Reality** (Chapters 1-3)
+- Memory Hierarchy
+- Thinking in Bandwidth
+- When Parallelism Pays
+- *Interlude: A Measurement Mindset*
+
+**Part II: The Algebra of Efficiency** (Chapters 4-8)
+- Chunking (Associativity)
+- Factoring (Separability)
+- Skipping (Sparsity)
+- Locality (Tiling)
+- Fusion (Operator Combination)
+
+**Part III: The Investigations** (Chapters 9-14)
+- Matrix Multiply Investigation
+- FlashAttention Derivation
+- LoRA and Low-Rank Adaptation
+- Quantization Deep Dive
+- Distributed Training
+- Inference Optimization
+
+**Part IV: The Method** (Chapters 15-18)
+- The Art of Measurement
+- The Art of Hypothesis
+- The Art of Analogy
+- When Not to Optimize
+
+**Appendices**
+- Glossary of Key Terms
 
 ## 🤝 Contributing
 
