@@ -20,7 +20,7 @@ Three questions guide every performance investigation:
 
 ## The Roofline Preview
 
-We introduced the roofline model in @sec-bandwidth-tyranny. It tells us the maximum achievable performance for any operation based on its arithmetic intensity:
+We introduced the roofline model in @sec-bandwidth. It tells us the maximum achievable performance for any operation based on its arithmetic intensity:
 
 $$\text{Performance} \leq \min(\text{Peak FLOPS}, \text{Bandwidth} \times \text{Arithmetic Intensity})$$
 

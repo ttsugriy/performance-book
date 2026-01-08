@@ -1,6 +1,6 @@
 ---
-title: "The Nature of Fast"
-subtitle: "Investigations in Computational Performance"
+title: "The Algebra of Speed"
+subtitle: "Mathematical Foundations of Computational Performance"
 ---
 
 # Preface {.unnumbered}
@@ -160,10 +160,10 @@ This book stands on the shoulders of giants:
 
 ## Let's Begin
 
-The first chapter starts with a lie—one that most of us were taught in computer science classes, one that shapes how we think about algorithms, and one that leads us astray when we try to make code fast.
+The first chapter starts with a fundamental truth about modern hardware—one that most algorithms courses gloss over, one that shapes what "fast" actually means in practice.
 
-The lie is the Random Access Machine model.
+The truth is that memory has hierarchy, and that hierarchy changes everything.
 
-Let's investigate why it's wrong, and what to do about it.
+Let's investigate.
 
-[**Chapter 1: The Lie of the RAM Model →**](chapters/01-ram-model-lie.qmd)
+[**Chapter 1: The Memory Hierarchy →**](chapters/01-memory-hierarchy.qmd)

@@ -3,8 +3,8 @@ project:
   output-dir: _site
 
 book:
-  title: "The Nature of Fast"
-  subtitle: "Investigations in Computational Performance"
+  title: "The Algebra of Speed"
+  subtitle: "Mathematical Foundations of Computational Performance"
   author: "Taras Tsugrii"
   date: today
   repo-url: https://github.com/ttsugriy/performance-book
@@ -13,11 +13,11 @@ book:
 
   chapters:
     - index.qmd
-    - part: "Part I: The Physics of Computation"
+    - part: "Part I: The Hardware Reality"
       chapters:
-        - chapters/01-ram-model-lie.qmd
-        - chapters/02-bandwidth-tyranny.qmd
-        - chapters/03-parallel-trap.qmd
+        - chapters/01-memory-hierarchy.qmd
+        - chapters/02-bandwidth.qmd
+        - chapters/03-parallelism.qmd
         - chapters/interlude-measurement.qmd
     - part: "Part II: The Algebra of Efficiency"
       chapters:

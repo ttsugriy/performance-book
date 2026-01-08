@@ -5,7 +5,7 @@ This glossary defines key terms used throughout the book. Terms are organized al
 ---
 
 **Arithmetic Intensity**
-: The ratio of floating-point operations to bytes transferred from memory. Measured in FLOPS/byte. High arithmetic intensity operations are compute-bound; low arithmetic intensity operations are memory-bound. See @sec-bandwidth-tyranny.
+: The ratio of floating-point operations to bytes transferred from memory. Measured in FLOPS/byte. High arithmetic intensity operations are compute-bound; low arithmetic intensity operations are memory-bound. See @sec-bandwidth.
 
 **Associativity**
 : A mathematical property where $(a \oplus b) \oplus c = a \oplus (b \oplus c)$ for some operation $\oplus$. Enables chunked and parallel processing because results can be combined in any order. The foundation of streaming algorithms and online computations.

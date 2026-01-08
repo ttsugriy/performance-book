@@ -1,12 +1,15 @@
 ---
-title: "The Parallel Trap"
-subtitle: "Why More Cores Don't Always Mean More Speed"
+title: "When Parallelism Pays"
+subtitle: "Understanding the True Cost of Coordination"
+id: sec-parallelism
 ---
 
 ::: {.chapter-opener}
 Parallelism promises: "More cores, more speed."
 
 Parallelism delivers: "More cores, more coordination overhead, *sometimes* more speed."
+
+Understanding when parallelism helps—and when it hurts—is essential for making good performance decisions.
 :::
 
 ## The Third Lie

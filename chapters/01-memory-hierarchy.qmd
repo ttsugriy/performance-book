@@ -1,14 +1,13 @@
 ---
-title: "The Lie of the RAM Model"
-subtitle: "Why Everything You Learned About Memory Is Wrong"
+title: "The Memory Hierarchy"
+subtitle: "Understanding the True Cost of Data Access"
+id: sec-memory-hierarchy
 ---
 
 ::: {.chapter-opener}
-In 1950, John von Neumann described a computer architecture where memory is uniform. Every address takes the same time to access. Every byte is equally close to the processor. The Random Access Machine (RAM) model was born.
+In 1950, John von Neumann described a computer architecture where memory is uniform. Every address takes the same time to access. Every byte is equally close to the processor.
 
-Seventy years later, we still teach it. And we still pretend it's true.
-
-It's not.
+Modern hardware is nothing like this. Memory is a hierarchy—and understanding that hierarchy is the first step to understanding performance.
 :::
 
 ## The Lie
