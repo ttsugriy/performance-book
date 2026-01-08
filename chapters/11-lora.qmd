@@ -1,8 +1,6 @@
 ---
 title: "Investigation: LoRA"
 subtitle: "The Low-Rank Structure of Fine-Tuning"
----
-
 ::: {.chapter-opener}
 GPT-3 has 175 billion parameters. Fine-tuning them requires 700+ GB of memory.
 
@@ -573,8 +571,6 @@ How would you discover LoRA if it didn't exist?
 
 **Chapter 4 (Chunking)**: LoRA training can be parallelized—adapters for different layers are independent.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -588,8 +584,6 @@ The accompanying notebook walks through:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/12-lora-investigation.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Hu et al. (2021). "LoRA: Low-Rank Adaptation of Large Language Models"
@@ -597,6 +591,3 @@ The accompanying notebook walks through:
 - Dettmers et al. (2023). "QLoRA: Efficient Finetuning of Quantized LLMs"
 - Sheng et al. (2023). "S-LoRA: Serving Thousands of Concurrent LoRA Adapters"
 
----
-
-[**← Previous: FlashAttention Investigation**](11-flash-attention.qmd) | [**Next: Quantization Investigation →**](12-quantization.qmd)

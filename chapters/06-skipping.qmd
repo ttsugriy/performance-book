@@ -1,8 +1,6 @@
 ---
 title: "Skipping"
 subtitle: "The Art of Not Computing"
----
-
 ::: {.chapter-opener}
 The most powerful optimization: don't do the work at all.
 
@@ -450,8 +448,6 @@ All three optimization properties we've seen—associativity (chunking), separab
 
 The property tells you what's mathematically possible. The hardware tells you what's practically fast.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -465,8 +461,6 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/06-sparsity-moe.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Hoefler et al. (2021). "Sparsity in Deep Learning: Pruning and growth for efficient inference and training in neural networks"
@@ -474,6 +468,3 @@ The accompanying notebook lets you:
 - Mishra et al. (2021). "Accelerating Sparse Deep Neural Networks" (NVIDIA 2:4 sparsity)
 - Beltagy et al. (2020). "Longformer: The Long-Document Transformer"
 
----
-
-[**← Previous: Factoring**](05-factoring.qmd) | [**Next: Locality →**](07-locality.qmd)

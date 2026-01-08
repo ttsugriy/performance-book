@@ -2,8 +2,6 @@
 title: "Fusion"
 subtitle: "When Combining Operations Beats Separating Them"
 id: sec-fusion
----
-
 ::: {.chapter-opener}
 Every memory round-trip has a cost. If you write to memory just to read it back, you've paid twice for nothing.
 
@@ -400,8 +398,6 @@ The "fusion" here is extreme: all intermediates stay in SRAM, never touching HBM
 
 5. **Fusion has limits**: Register pressure, compilation overhead, and dynamic shapes all constrain what can be fused.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -415,6 +411,3 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/08-fusion.ipynb)
 :::
 
----
-
-[**← Previous: Locality**](07-locality.qmd) | [**Next: Matrix Multiply Investigation →**](10-matrix-multiply.qmd)

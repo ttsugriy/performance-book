@@ -2,8 +2,6 @@
 title: "The Art of Hypothesis"
 subtitle: "Finding the Bottleneck Before Optimizing"
 id: sec-hypothesis
----
-
 ::: {.chapter-opener}
 George Pólya's first principle of problem-solving: "Understand the problem."
 
@@ -519,8 +517,6 @@ Good: "The code is doing 2× more FLOPs than necessary due to
 
 The best performance engineers aren't the ones who optimize the fastest. They're the ones who find the right thing to optimize.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -534,8 +530,6 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/21-hypothesis.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Pólya (1945). "How to Solve It"
@@ -543,6 +537,3 @@ The accompanying notebook lets you:
 - Hennessy & Patterson (2017). "Computer Architecture: A Quantitative Approach"
 - The Scientific Method (yes, that one from school)
 
----
-
-[**← Previous: The Art of Measurement**](15-measurement.qmd) | [**Next: The Art of Analogy →**](17-analogy.qmd)

@@ -1,8 +1,6 @@
 ---
 title: "Investigation: FlashAttention"
 subtitle: "Deriving the Algorithm That Changed Transformers"
----
-
 ::: {.chapter-opener}
 Don't explain FlashAttention. Derive it.
 
@@ -625,8 +623,6 @@ This is the investigation pattern. Not "here's FlashAttention" but "how would yo
 
 5. **The derivation teaches more than the result**: Understanding why FlashAttention works lets you find the next FlashAttention.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -640,8 +636,6 @@ The accompanying notebook walks through:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/11-flash-attention.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Dao et al. (2022). "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
@@ -649,6 +643,3 @@ The accompanying notebook walks through:
 - Rabe & Staats (2021). "Self-attention Does Not Need O(n²) Memory" - Independent discovery of online softmax
 - Milakov & Gimelshein (2018). "Online normalizer calculation for softmax" - The mathematical foundation
 
----
-
-[**← Previous: Matrix Multiply Investigation**](10-matrix-multiply.qmd) | [**Next: LoRA Investigation →**](12-lora.qmd)

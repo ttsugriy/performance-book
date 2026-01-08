@@ -2,8 +2,6 @@
 title: "The Art of Measurement"
 subtitle: "How to Know What's Actually Happening"
 id: sec-measurement
----
-
 ::: {.chapter-opener}
 "If you can't measure it, you can't improve it." — Peter Drucker
 
@@ -610,8 +608,6 @@ CI systems can run benchmarks on every commit and alert on regressions.
 
 The goal is not to measure *something*. It's to measure *the right thing*, correctly, and draw valid conclusions.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -625,8 +621,6 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/20-measurement.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Gregg (2020). "Systems Performance: Enterprise and the Cloud" (2nd ed.)
@@ -634,6 +628,3 @@ The accompanying notebook lets you:
 - Mytkowicz et al. (2009). "Producing Wrong Data Without Doing Anything Obviously Wrong!"
 - Fleming & Wallace (1986). "How Not to Lie with Statistics: The Correct Way to Summarize Benchmark Results"
 
----
-
-[**← Previous: Quantization Investigation**](12-quantization.qmd) | [**Next: The Art of Hypothesis →**](16-hypothesis.qmd)

@@ -1,8 +1,6 @@
 ---
 title: "Chunking"
 subtitle: "How Associativity Enables Parallelism and Streaming"
----
-
 ::: {.chapter-opener}
 You have a billion numbers. You need their average.
 
@@ -357,8 +355,6 @@ Associativity        →    Limited SRAM         →  Tiled/blocked algorithms
 
 5. **Hardware rewards associativity**: The property aligns with every level of the memory hierarchy and parallel execution
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -372,14 +368,9 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/04-associativity-softmax.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Milakov & Gimelshein (2018). "Online normalizer calculation for softmax" - The mathematical foundation
 - Dao et al. (2022). "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
 - Welford (1962). "Note on a method for calculating corrected sums of squares and products" - The classic streaming variance
 
----
-
-[**← Previous: The Parallel Trap**](03-parallel-trap.qmd) | [**Next: Factoring →**](05-factoring.qmd)

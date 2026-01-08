@@ -2,8 +2,6 @@
 title: "Thinking in Bandwidth"
 subtitle: "Why Moving Data Often Costs More Than Computing"
 id: sec-bandwidth
----
-
 ::: {.chapter-opener}
 An H100 GPU can perform 2,000 trillion operations per second. It can move 3 trillion bytes per second from memory. That's 667 operations per byte. If your algorithm does fewer than ~100 operations per byte, you're not computing—you're waiting.
 
@@ -276,8 +274,6 @@ Many performance improvements fail because they optimize the wrong thing. Making
 
 Know your bottleneck. Then attack it.
 
----
-
 ::: {.callout-note}
 ## Interactive: The Roofline Explorer
 
@@ -320,8 +316,6 @@ html`
 ```
 :::
 
----
-
 ## Key Takeaways
 
 1. **Computation is cheap. Communication is expensive.** Modern hardware can compute far faster than it can move data.
@@ -334,14 +328,9 @@ html`
 
 5. **Know your bottleneck before optimizing.** Measure intensity, compare to hardware ridge point, then attack the right thing.
 
----
-
 ## Further Reading
 
 - Williams et al., ["Roofline: An Insightful Visual Performance Model"](https://people.eecs.berkeley.edu/~kubitron/cs252/handouts/papers/RooflineVyNoYellow.pdf) — The original paper
 - NVIDIA, [CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/) — Memory optimization for GPUs
 - Intel, [Advisor Roofline Analysis](https://www.intel.com/content/www/us/en/developer/articles/guide/intel-advisor-roofline.html) — Tool for automatic roofline analysis
 
----
-
-[**← Previous: The Lie of the RAM Model**](01-ram-model-lie.qmd) | [**Next: The Parallel Trap →**](03-parallel-trap.qmd)

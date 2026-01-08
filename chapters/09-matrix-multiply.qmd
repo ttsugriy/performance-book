@@ -1,8 +1,6 @@
 ---
 title: "Investigation: Matrix Multiply"
 subtitle: "Why This Operation Rules Modern Computing"
----
-
 ::: {.chapter-opener}
 Two matrix multiply implementations. Same algorithm. Same hardware. Same inputs.
 
@@ -601,8 +599,6 @@ These are multiplicative. Miss any one, and you leave 10× on the table.
 
 The best algorithms aren't just correct. They're *aligned* with hardware.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -616,8 +612,6 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/10-matrix-multiply.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Goto & Van De Geijn (2008). "Anatomy of High-Performance Matrix Multiplication"
@@ -625,6 +619,3 @@ The accompanying notebook lets you:
 - Jia et al. (2018). "Dissecting the NVIDIA Volta GPU Architecture via Microbenchmarking"
 - NVIDIA CUTLASS: https://github.com/NVIDIA/cutlass
 
----
-
-[**← Previous: Locality**](07-locality.qmd) | [**Next: FlashAttention Investigation →**](11-flash-attention.qmd)

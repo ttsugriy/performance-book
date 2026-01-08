@@ -1,8 +1,6 @@
 ---
 title: "Factoring"
 subtitle: "When Big Computations Decompose Into Small Ones"
----
-
 ::: {.chapter-opener}
 Take a 70-billion-parameter model. Fine-tune it on your task.
 
@@ -463,8 +461,6 @@ Chapter 12 explores LoRA in depth:
 - QLoRA and quantization integration
 - When to use full fine-tuning instead
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -478,8 +474,6 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/05-factoring-lora.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Howard et al. (2017). "MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications"
@@ -487,6 +481,3 @@ The accompanying notebook lets you:
 - Golub & Van Loan (2013). "Matrix Computations" - The SVD bible
 - Aghajanyan et al. (2020). "Intrinsic Dimensionality Explains the Effectiveness of Language Model Fine-Tuning"
 
----
-
-[**← Previous: Chunking**](04-chunking.qmd) | [**Next: Skipping →**](06-skipping.qmd)

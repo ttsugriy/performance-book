@@ -1,8 +1,6 @@
 ---
 title: "Locality"
 subtitle: "Why Nearby Data Matters"
----
-
 ::: {.chapter-opener}
 You've learned three algebraic properties that enable efficiency: associativity (chunking), separability (factoring), and sparsity (skipping).
 
@@ -570,8 +568,6 @@ In Part III, we'll see how masters wield these properties. We'll investigate mat
 
 The art of performance is recognizing which properties your problem has, and designing algorithms that exploit them on real hardware.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -585,8 +581,6 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/07-locality-tiling.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Frigo et al. (1999). "Cache-Oblivious Algorithms"
@@ -594,6 +588,3 @@ The accompanying notebook lets you:
 - Goto & Van De Geijn (2008). "Anatomy of High-Performance Matrix Multiplication"
 - Williams et al. (2009). "Roofline: An Insightful Visual Performance Model"
 
----
-
-[**← Previous: Skipping**](06-skipping.qmd) | [**Next: The Matrix Multiply Investigation →**](10-matrix-multiply.qmd)

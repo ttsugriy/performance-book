@@ -1,8 +1,6 @@
 ---
 title: "Investigation: Quantization"
 subtitle: "Why 4 Bits Can Do the Work of 32"
----
-
 ::: {.chapter-opener}
 Take a 70-billion-parameter model. Reduce every weight from 32 bits to 4 bits.
 
@@ -506,8 +504,6 @@ The theme: understand the failure mode (outliers), then design around it.
 
 **Chapter 2 (Bandwidth)**: Quantization's benefit is often memory bandwidth, not compute
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -521,8 +517,6 @@ The accompanying notebook walks through:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/13-quantization-investigation.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Dettmers et al. (2022). "LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale"
@@ -530,6 +524,3 @@ The accompanying notebook walks through:
 - Lin et al. (2023). "AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration"
 - Xiao et al. (2023). "SmoothQuant: Accurate and Efficient Post-Training Quantization for Large Language Models"
 
----
-
-[**← Previous: LoRA Investigation**](12-lora.qmd) | [**Next: The Art of Measurement →**](15-measurement.qmd)

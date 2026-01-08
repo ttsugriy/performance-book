@@ -2,8 +2,6 @@
 title: "Inference Optimization"
 subtitle: "KV Caching, Speculative Decoding, and Serving at Scale"
 id: sec-inference
----
-
 ::: {.chapter-opener}
 Training is batch-oriented: process thousands of examples together. Inference is latency-oriented: one user waits for one response.
 
@@ -405,8 +403,6 @@ class LLMServer:
 
 7. **Quantization enables scale**: INT4 lets you serve 4× larger models.
 
----
-
 ::: {.callout-note}
 ## Further Reading
 
@@ -417,6 +413,3 @@ class LLMServer:
 - vLLM documentation: https://vllm.readthedocs.io/
 :::
 
----
-
-[**← Previous: Distributed Training**](13-distributed.qmd) | [**Next: Measurement →**](15-measurement.qmd)

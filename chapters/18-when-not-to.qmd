@@ -2,8 +2,6 @@
 title: "When Not to Optimize"
 subtitle: "The Art of Knowing When to Stop"
 id: sec-when-not-to
----
-
 ::: {.chapter-opener}
 "Premature optimization is the root of all evil." — Donald Knuth
 
@@ -314,8 +312,6 @@ This chapter adds: knowing *when* to fix it—and when not to.
 
 7. **Consider hardware**: Sometimes buying better hardware is cheaper than engineering time.
 
----
-
 ::: {.callout-tip}
 ## The 10x Rule
 
@@ -324,6 +320,3 @@ A useful heuristic: Only optimize if you expect at least a 10× improvement in t
 Smaller gains are rarely worth the complexity cost.
 :::
 
----
-
-[**← Previous: The Art of Analogy**](17-analogy.qmd) | [**Glossary →**](glossary.qmd)

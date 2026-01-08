@@ -2,8 +2,6 @@
 title: "When Parallelism Pays"
 subtitle: "Understanding the True Cost of Coordination"
 id: sec-parallelism
----
-
 ::: {.chapter-opener}
 Parallelism promises: "More cores, more speed."
 
@@ -435,8 +433,6 @@ In the coming chapters, we'll see how mathematical structure determines parallel
 
 The math isn't abstract—it's a guide to what can be parallelized without changing the answer.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -449,14 +445,9 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/03-parallel-scaling.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Amdahl, G. (1967). "Validity of the single processor approach to achieving large scale computing capabilities"
 - Gustafson, J. (1988). "Reevaluating Amdahl's Law" (the optimistic counterpoint)
 - [NVIDIA CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/) - Warp divergence and occupancy
 
----
-
-[**← Previous: The Tyranny of Bandwidth**](02-bandwidth-tyranny.qmd) | [**Next: Chunking →**](04-chunking.qmd)

@@ -2,8 +2,6 @@
 title: "The Art of Analogy"
 subtitle: "Finding Related Problems That Have Been Solved"
 id: sec-analogy
----
-
 ::: {.chapter-opener}
 Pólya's most powerful heuristic: "Do you know a related problem?"
 
@@ -530,8 +528,6 @@ This is the meta-pattern of performance engineering:
 
 The best performance engineers are collectors of patterns. Every new problem is an opportunity to recognize an old friend in new clothes.
 
----
-
 ::: {.callout-note}
 ## Try It Yourself
 
@@ -545,16 +541,12 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/22-analogy.ipynb)
 :::
 
----
-
 ## Further Reading
 
 - Pólya (1945). "How to Solve It" (especially Chapter 2: How to Solve It)
 - Hofstadter (2001). "Analogy as the Core of Cognition"
 - Gentner (1983). "Structure-Mapping: A Theoretical Framework for Analogy"
 - McConnell (2004). "Code Complete" (Chapter 2: Metaphors for a Richer Understanding)
-
----
 
 ## Conclusion: The Nature of Fast
 
@@ -581,6 +573,3 @@ The art of performance engineering is matching algorithmic properties to hardwar
 
 This is the nature of fast.
 
----
-
-[**← Previous: The Art of Hypothesis**](16-hypothesis.qmd)

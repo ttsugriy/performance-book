@@ -2,8 +2,6 @@
 title: "Distributed Training"
 subtitle: "When One GPU Isn't Enough"
 id: sec-distributed
----
-
 ::: {.chapter-opener}
 GPT-3 has 175 billion parameters. At FP16, that's 350GB. The largest single GPU has 80GB of memory.
 
@@ -462,8 +460,6 @@ Where:
 
 6. **Mixed precision is essential**: 2× memory and 2× speed with careful gradient scaling.
 
----
-
 ::: {.callout-note}
 ## Further Reading
 
@@ -473,6 +469,3 @@ Where:
 - PyTorch FSDP documentation: https://pytorch.org/docs/stable/fsdp.html
 :::
 
----
-
-[**← Previous: Quantization**](12-quantization.qmd) | [**Next: Measurement →**](15-measurement.qmd)
