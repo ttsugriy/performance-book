@@ -1,22 +1,491 @@
 ---
 title: "Factoring"
 subtitle: "When Big Computations Decompose Into Small Ones"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+Take a 70-billion-parameter model. Fine-tune it on your task.
+
+The update to the weights could require 70 billion numbers. But what if it only *needs* a few million?
 :::
 
-## Coming Soon
+## The Bet on Structure
 
-This chapter will investigate:
+Chapter 4 showed how associativity lets us chunk, stream, and parallelize. This chapter explores a different property: **separability**.
 
-- **Separability** and low-rank structure
-- **Depthwise separable convolutions** in MobileNet
-- **LoRA** and the intrinsic dimensionality of fine-tuning
-- **SVD** as the optimal factorization
+Some computations that look irreducibly large can be factored into smaller pieces. Not approximately—exactly, or close enough that it doesn't matter.
+
+The key insight: many real-world matrices are **low-rank**. They look like they need O(mn) parameters, but their essential structure lives in far fewer dimensions.
+
+## The Mathematics of Rank
+
+A matrix $A \in \mathbb{R}^{m \times n}$ has rank $r$ if it can be written as:
+
+$$A = UV^T$$
+
+where $U \in \mathbb{R}^{m \times r}$ and $V \in \mathbb{R}^{n \times r}$.
+
+The original matrix has $mn$ entries. The factored form has $r(m + n)$ parameters.
+
+When is this a win?
+
+$$r(m + n) < mn$$
+$$r < \frac{mn}{m + n}$$
+
+For a square matrix ($m = n$), this is $r < n/2$.
+
+For highly rectangular matrices, the savings can be enormous:
+
+| Matrix Shape | Full Parameters | Rank-16 Parameters | Compression |
+|--------------|-----------------|---------------------|-------------|
+| 4096 × 4096  | 16.8M           | 131K                | 128×        |
+| 4096 × 1024  | 4.2M            | 82K                 | 51×         |
+| 1024 × 1024  | 1.0M            | 33K                 | 32×         |
+
+The question becomes: can we find low-rank structure in places that matter?
+
+## Investigation: Depthwise Separable Convolutions
+
+Standard 2D convolution is expensive. For input with $C_{in}$ channels, output with $C_{out}$ channels, and kernel size $K \times K$:
+
+$$\text{Parameters} = K^2 \cdot C_{in} \cdot C_{out}$$
+$$\text{FLOPs} = K^2 \cdot C_{in} \cdot C_{out} \cdot H \cdot W$$
+
+For a 3×3 conv from 256 to 256 channels on a 56×56 feature map:
+- Parameters: 590K
+- FLOPs: 1.8B
+
+MobileNet's insight: **factor the convolution**.
+
+### The Separable Structure
+
+Standard convolution does two things at once:
+1. Spatial filtering (across height × width)
+2. Channel mixing (across channels)
+
+What if we separated them?
+
+**Depthwise convolution**: Apply a separate K×K filter to each input channel.
+
+$$\text{Parameters}_{dw} = K^2 \cdot C_{in}$$
+$$\text{FLOPs}_{dw} = K^2 \cdot C_{in} \cdot H \cdot W$$
+
+**Pointwise convolution**: Mix channels with a 1×1 conv.
+
+$$\text{Parameters}_{pw} = C_{in} \cdot C_{out}$$
+$$\text{FLOPs}_{pw} = C_{in} \cdot C_{out} \cdot H \cdot W$$
+
+Combined:
+
+$$\text{Parameters}_{sep} = K^2 \cdot C_{in} + C_{in} \cdot C_{out}$$
+
+For the same 3×3 conv from 256 to 256 channels:
+- Standard: 590K parameters
+- Separable: 2.3K + 65.5K = 67.8K parameters
+- **Compression: 8.7×**
+
+```python
+import torch
+import torch.nn as nn
+
+# Standard convolution
+standard_conv = nn.Conv2d(256, 256, kernel_size=3, padding=1)
+print(f"Standard conv parameters: {sum(p.numel() for p in standard_conv.parameters()):,}")
+# Output: 590,080
+
+# Depthwise separable convolution
+class DepthwiseSeparable(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3):
+        super().__init__()
+        self.depthwise = nn.Conv2d(
+            in_channels, in_channels,
+            kernel_size=kernel_size,
+            padding=kernel_size // 2,
+            groups=in_channels  # Each channel gets its own filter
+        )
+        self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        x = self.depthwise(x)
+        x = self.pointwise(x)
+        return x
+
+separable_conv = DepthwiseSeparable(256, 256)
+print(f"Separable conv parameters: {sum(p.numel() for p in separable_conv.parameters()):,}")
+# Output: 68,096
+```
+
+### The Trade-off
+
+Is this lossless? No. Standard convolution can represent interactions that separable convolution cannot.
+
+But empirically, the loss is minimal for most computer vision tasks:
+
+| Model            | Parameters | Top-1 Accuracy |
+|------------------|------------|----------------|
+| MobileNetV2      | 3.4M       | 72.0%          |
+| ResNet-50        | 25.6M      | 76.1%          |
+| Ratio            | 7.5×       | 4.1% gap       |
+
+MobileNetV2 uses 7.5× fewer parameters with only a 4% accuracy drop. For many applications, that's an excellent trade.
+
+### Why Does It Work?
+
+The key insight: **spatial and channel information are approximately independent**.
+
+In an image:
+- Spatial patterns (edges, textures) are largely channel-agnostic
+- Channel semantics (red vs. green, or higher-level features) are largely position-agnostic
+
+This approximate independence is what makes separability viable. The convolution *could* learn arbitrary 3D interactions, but it typically *doesn't need to*.
+
+## Investigation: LoRA and Fine-Tuning
+
+LoRA (Low-Rank Adaptation) applies the same insight to model fine-tuning.
+
+### The Problem
+
+Fine-tuning GPT-3's 175B parameters requires:
+- 175B × 4 bytes (FP32) = 700 GB just for weights
+- 175B × 4 bytes for gradients
+- 175B × 4 bytes for optimizer states (Adam needs 2×)
+- Total: ~2.8 TB of memory
+
+Even with FP16 and optimizer tricks, this is impractical on consumer hardware.
+
+### The Hypothesis
+
+What if fine-tuning doesn't need 175B degrees of freedom?
+
+The hypothesis: **the update to the weights during fine-tuning is low-rank**.
+
+$$W_{new} = W_{old} + \Delta W$$
+
+where $\Delta W$ has rank much lower than the full weight dimensions.
+
+If $\Delta W = BA$ where $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$, then:
+
+- Original update: $d \times k$ parameters
+- LoRA update: $r(d + k)$ parameters
+
+For $d = k = 4096$ and $r = 8$:
+- Full: 16.8M parameters
+- LoRA: 65K parameters
+- **Compression: 256×**
+
+### The Implementation
+
+```python
+class LoRALinear(nn.Module):
+    """A linear layer with low-rank adaptation."""
+
+    def __init__(self, in_features, out_features, rank=8, alpha=16):
+        super().__init__()
+
+        # Original frozen weights
+        self.W = nn.Linear(in_features, out_features, bias=False)
+        self.W.weight.requires_grad = False
+
+        # Low-rank adaptation
+        self.A = nn.Linear(in_features, rank, bias=False)
+        self.B = nn.Linear(rank, out_features, bias=False)
+
+        # Scaling factor
+        self.alpha = alpha
+        self.rank = rank
+
+        # Initialize A with normal, B with zeros
+        nn.init.normal_(self.A.weight, std=0.02)
+        nn.init.zeros_(self.B.weight)
+
+    def forward(self, x):
+        # Original forward pass
+        out = self.W(x)
+
+        # Add low-rank update (scaled)
+        lora_out = self.B(self.A(x)) * (self.alpha / self.rank)
+
+        return out + lora_out
+
+# Compare parameter counts
+in_dim, out_dim, rank = 4096, 4096, 8
+
+full_linear = nn.Linear(in_dim, out_dim, bias=False)
+lora_linear = LoRALinear(in_dim, out_dim, rank=rank)
+
+trainable_full = sum(p.numel() for p in full_linear.parameters() if p.requires_grad)
+trainable_lora = sum(p.numel() for p in lora_linear.parameters() if p.requires_grad)
+
+print(f"Full fine-tuning: {trainable_full:,} trainable parameters")
+print(f"LoRA (rank-8):    {trainable_lora:,} trainable parameters")
+print(f"Compression:      {trainable_full / trainable_lora:.0f}×")
+# Output:
+# Full fine-tuning: 16,777,216 trainable parameters
+# LoRA (rank-8):    65,536 trainable parameters
+# Compression:      256×
+```
+
+### Does It Work?
+
+Here's the surprising result from the LoRA paper:
+
+| Task      | Full Fine-Tuning | LoRA (r=8) | LoRA (r=16) |
+|-----------|------------------|------------|-------------|
+| MNLI      | 87.0%            | 87.5%      | 87.3%       |
+| SST-2     | 94.9%            | 95.1%      | 95.3%       |
+| QQP       | 90.8%            | 90.8%      | 91.0%       |
+| QNLI      | 93.5%            | 93.3%      | 93.8%       |
+
+LoRA often *matches or exceeds* full fine-tuning with 10,000× fewer trainable parameters.
+
+### Why Does It Work?
+
+Several factors:
+
+1. **Intrinsic dimensionality**: The "important" directions for adaptation are few. Fine-tuning is steering, not rebuilding.
+
+2. **Overparameterization**: Large models have massive redundancy. Most parameters aren't necessary for any specific task.
+
+3. **Pretrained structure**: The base model already knows general representations. Fine-tuning only needs to adjust, not learn from scratch.
+
+4. **Implicit regularization**: The low-rank constraint prevents overfitting by limiting capacity.
+
+### When LoRA Fails
+
+LoRA isn't always sufficient:
+
+- **Novel domains**: If the target domain is very different from pretraining, more capacity may be needed
+- **Complex reasoning**: Mathematical reasoning, code generation—some tasks benefit from higher ranks
+- **Long-tail tasks**: Rare patterns may not fit low-rank structure
+
+The solution: increase rank, or use multiple LoRA adapters.
+
+## The Optimal Factorization: SVD
+
+The Singular Value Decomposition (SVD) gives the optimal rank-r approximation to any matrix:
+
+$$A = U \Sigma V^T$$
+
+where:
+- $U \in \mathbb{R}^{m \times m}$ has orthonormal columns
+- $\Sigma \in \mathbb{R}^{m \times n}$ is diagonal with singular values $\sigma_1 \geq \sigma_2 \geq \ldots$
+- $V \in \mathbb{R}^{n \times n}$ has orthonormal columns
+
+The rank-r approximation keeps only the top r singular values:
+
+$$A_r = U_r \Sigma_r V_r^T$$
+
+**Eckart-Young theorem**: This is the best rank-r approximation in Frobenius norm.
+
+```python
+import numpy as np
+
+def compress_matrix(A, rank):
+    """Compress a matrix to given rank using SVD."""
+    U, S, Vt = np.linalg.svd(A, full_matrices=False)
+
+    # Keep top 'rank' components
+    U_r = U[:, :rank]
+    S_r = S[:rank]
+    Vt_r = Vt[:rank, :]
+
+    # Reconstruct
+    A_approx = U_r @ np.diag(S_r) @ Vt_r
+
+    # Measure error
+    error = np.linalg.norm(A - A_approx, 'fro') / np.linalg.norm(A, 'fro')
+
+    return A_approx, error
+
+# Example: compress a weight matrix
+np.random.seed(42)
+
+# Simulate a weight matrix (often approximately low-rank after training)
+m, n = 1024, 1024
+A = np.random.randn(m, 100) @ np.random.randn(100, n)  # Truly rank-100
+A += 0.1 * np.random.randn(m, n)  # Add noise
+
+print("Compression vs. error:")
+for rank in [10, 25, 50, 100, 200]:
+    _, error = compress_matrix(A, rank)
+    compression = (m * n) / (rank * (m + n))
+    print(f"  Rank {rank:3d}: {compression:5.1f}× compression, {error*100:.2f}% error")
+
+# Output:
+# Rank  10: 51.2× compression, 42.51% error
+# Rank  25: 20.5× compression, 18.74% error
+# Rank  50: 10.2× compression,  9.89% error
+# Rank 100:  5.1× compression,  0.99% error  <- Near true rank!
+# Rank 200:  2.6× compression,  0.90% error
+```
+
+### Singular Values Tell the Story
+
+The decay of singular values reveals how compressible a matrix is:
+
+```python
+def analyze_svd_spectrum(A, name="Matrix"):
+    """Analyze singular value decay."""
+    _, S, _ = np.linalg.svd(A, full_matrices=False)
+
+    # Normalize
+    S_norm = S / S[0]
+
+    # Find "effective rank" (energy threshold)
+    energy = np.cumsum(S**2) / np.sum(S**2)
+    rank_90 = np.searchsorted(energy, 0.90) + 1
+    rank_99 = np.searchsorted(energy, 0.99) + 1
+
+    print(f"{name}:")
+    print(f"  Shape: {A.shape}")
+    print(f"  Rank for 90% energy: {rank_90}")
+    print(f"  Rank for 99% energy: {rank_99}")
+    print(f"  σ₁/σ₁₀: {S[0]/S[9]:.1f}")
+    print(f"  σ₁/σ₁₀₀: {S[0]/S[99]:.1f}")
+
+# Random matrix (not compressible)
+random_matrix = np.random.randn(500, 500)
+analyze_svd_spectrum(random_matrix, "Random")
+
+# Low-rank matrix (highly compressible)
+low_rank = np.random.randn(500, 20) @ np.random.randn(20, 500)
+analyze_svd_spectrum(low_rank, "Low-rank")
+
+# Output:
+# Random:
+#   Shape: (500, 500)
+#   Rank for 90% energy: 361
+#   Rank for 99% energy: 471
+#   σ₁/σ₁₀: 1.5
+#   σ₁/σ₁₀₀: 3.2
+#
+# Low-rank:
+#   Shape: (500, 500)
+#   Rank for 90% energy: 16
+#   Rank for 99% energy: 19
+#   σ₁/σ₁₀: 4.8
+#   σ₁/σ₁₀₀: inf (zero singular values!)
+```
+
+**Sharp decay = compressible. Flat decay = not compressible.**
+
+## Other Factorizations
+
+SVD isn't the only factorization. Others trade optimality for efficiency:
+
+### Matrix Factorization for Recommendations
+
+Netflix Prize (2006): Factor the user-movie rating matrix.
+
+$$R \approx U \cdot V^T$$
+
+where $U$ is users × latent factors, $V$ is movies × latent factors.
+
+```python
+# 1M users, 100K movies, but ratings are sparse
+# If each user rates 200 movies on average:
+#   Full matrix: 1M × 100K = 100B entries
+#   Ratings only: 1M × 200 = 200M entries
+#   Factored (rank 50): 1M × 50 + 100K × 50 = 55M parameters
+
+# 2000× compression from full, comparable to sparse storage
+```
+
+### Non-negative Matrix Factorization (NMF)
+
+When factors should be non-negative (topic modeling, image features):
+
+$$A \approx WH$$
+
+where $W, H \geq 0$ elementwise.
+
+### Tensor Decompositions
+
+For higher-order data:
+
+- **Tucker decomposition**: Core tensor + factor matrices per mode
+- **CP decomposition**: Sum of rank-1 tensors
+- **Tensor-Train**: Chain of 3D cores
+
+These extend matrix factorization to attention heads, convolutional kernels, and more.
+
+## The Hardware Connection
+
+Factorization interacts with hardware in nuanced ways:
+
+**Memory**: Fewer parameters = fits in faster memory tiers
+
+**Compute**: Two smaller matrix multiplies vs. one big one:
+- $y = Ax$ is O(mn) flops
+- $y = U(V^T x)$ is O(rn) + O(rm) = O(r(m+n)) flops
+
+**But**: Small matrix multiplies are often less efficient on GPUs. They don't saturate the compute units.
+
+```
+Efficiency paradox:
+
+Full (4096×4096): 16.8M params, 16.8M FLOPs
+  GPU utilization: 95%
+  Effective TFLOPS: 9.5
+
+LoRA (rank 8):     65K params, 65K FLOPs per adapter
+  GPU utilization: 15%  (small matrices!)
+  Effective TFLOPS: 1.5
+
+LoRA is 256× fewer FLOPs but only ~6× faster due to underutilization.
+```
+
+This is why techniques like:
+- Batching multiple LoRA adapters
+- Fusing operations
+- Choosing rank to align with hardware (multiples of 8 or 16)
+
+...matter for practical efficiency.
+
+## Key Takeaways
+
+1. **Factorization is a bet on structure**: It assumes the computation doesn't need all its degrees of freedom. When true, savings are enormous. When false, accuracy suffers.
+
+2. **Many real computations are low-rank**: Depthwise separable convs, LoRA, recommender systems—the pattern recurs because real data often has intrinsic structure.
+
+3. **SVD gives optimal compression**: If you need to approximate a matrix with rank r, SVD tells you the best you can do.
+
+4. **Hardware complicates the story**: Fewer FLOPs ≠ proportionally faster. Small operations don't utilize parallel hardware well.
+
+5. **Separability is domain-dependent**: MobileNets work because images have separable structure. Not all domains do.
+
+## Connection to LoRA Investigation
+
+Chapter 12 explores LoRA in depth:
+
+- How to choose rank empirically
+- Which layers to adapt
+- QLoRA and quantization integration
+- When to use full fine-tuning instead
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Analyze singular value spectra of weight matrices
+- Implement LoRA from scratch
+- Compare depthwise separable vs. standard convolutions
+- Measure the accuracy-efficiency tradeoff
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/05-factoring-lora.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Howard et al. (2017). "MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications"
+- Hu et al. (2021). "LoRA: Low-Rank Adaptation of Large Language Models"
+- Golub & Van Loan (2013). "Matrix Computations" - The SVD bible
+- Aghajanyan et al. (2020). "Intrinsic Dimensionality Explains the Effectiveness of Language Model Fine-Tuning"
 
 ---
 

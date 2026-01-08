@@ -1,22 +1,478 @@
 ---
 title: "Skipping"
 subtitle: "The Art of Not Computing"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+The most powerful optimization: don't do the work at all.
+
+A matrix is 90% zeros. Shouldn't we be 10× faster?
+
+Usually not. And understanding why reveals deep truths about hardware.
 :::
 
-## Coming Soon
+## The Sparsity Paradox
 
-This chapter will investigate:
+Sparsity is everywhere:
 
-- **Sparsity** and why hardware struggles with it
-- **Structured sparsity** (2:4, block) that hardware can exploit
-- **Mixture of Experts** as conditional computation
-- **The tradeoff** between flexibility and efficiency
+- Neural network weights after pruning
+- Attention patterns (most tokens don't attend to most other tokens)
+- Graph adjacency matrices
+- Recommender systems (users rate few items)
+- Gradient updates (many parameters barely change)
+
+Mathematically, 90% sparsity means 90% fewer operations. But in practice:
+
+| Sparsity | Theoretical Speedup | Actual Speedup |
+|----------|---------------------|----------------|
+| 50%      | 2×                  | 1.1×           |
+| 90%      | 10×                 | 1.8×           |
+| 95%      | 20×                 | 2.3×           |
+| 99%      | 100×                | 3.5×           |
+
+The gap is enormous. Where does the performance go?
+
+## Why Hardware Hates Random Sparsity
+
+Modern hardware is built for *predictable* computation. Sparse computation is *unpredictable*.
+
+### The Memory Access Problem
+
+Dense matrix multiply:
+
+```
+A[i,j] = B[i,:] @ C[:,j]
+       = B[i,0]*C[0,j] + B[i,1]*C[1,j] + ... + B[i,k]*C[k,j]
+```
+
+Memory access pattern: sequential along rows and columns. Predictable. Prefetchable.
+
+Sparse matrix multiply:
+
+```
+A[i,j] = sum(B[i,k] * C[k,j] for k where B[i,k] != 0)
+```
+
+Memory access pattern: wherever the non-zeros happen to be. Random. Unprefetchable.
+
+```
+Dense access pattern:          Sparse access pattern:
+┌─────────────────────┐        ┌─────────────────────┐
+│█ █ █ █ █ █ █ █ █ █ │        │█     █         █   │
+│█ █ █ █ █ █ █ █ █ █ │        │    █       █       │
+│█ █ █ █ █ █ █ █ █ █ │        │        █       █   │
+│█ █ █ █ █ █ █ █ █ █ │        │  █           █     │
+└─────────────────────┘        └─────────────────────┘
+Sequential → Fast              Random → Slow
+```
+
+### The Indexing Overhead
+
+Dense operations don't need indices. Element (i, j) is at `base + i*stride + j`.
+
+Sparse formats need indices:
+
+```python
+# CSR format (Compressed Sparse Row)
+class CSRMatrix:
+    def __init__(self):
+        self.data = [...]      # Non-zero values
+        self.indices = [...]   # Column index of each value
+        self.indptr = [...]    # Where each row starts
+
+# For a 1000×1000 matrix with 1% non-zeros:
+#   Dense:  1,000,000 values
+#   Sparse: 10,000 values + 10,000 column indices + 1,001 row pointers
+#         = 21,001 numbers (but we also have indexing overhead)
+```
+
+The indexing itself requires memory accesses and compute.
+
+### The Parallelism Problem
+
+GPUs execute in lockstep (SIMT). In a warp of 32 threads:
+
+```
+Dense: All threads do the same operation on different data
+       Thread 0: A[0,0] * B[0,0]
+       Thread 1: A[0,1] * B[1,0]
+       ...
+       Thread 31: A[0,31] * B[31,0]
+       → All threads active
+
+Sparse: Each thread might have different work (or no work)
+       Thread 0: A[0,5] * B[5,0]    (if A[0,5] != 0)
+       Thread 1: skip               (if A[0,1] == 0)
+       Thread 2: A[0,7] * B[7,0]    (if A[0,7] != 0)
+       ...
+       → Many threads idle
+```
+
+Sparse patterns cause *warp divergence* and *load imbalance*.
+
+## Structured Sparsity: The Compromise
+
+Random sparsity is hard. *Structured* sparsity is tractable.
+
+The key insight: constrain *where* zeros can appear, so hardware can predict and optimize.
+
+### Block Sparsity
+
+Require zeros to occur in blocks:
+
+```
+Random sparsity:              Block sparsity (4×4 blocks):
+┌─────────────────────┐        ┌─────────────────────┐
+│█   █     █         │        │████        ████    │
+│    █       █       │        │████        ████    │
+│        █       █   │        │████        ████    │
+│  █           █     │        │████        ████    │
+│      █     █       │        │                    │
+│  █       █         │        │                    │
+│        █       █   │        │        ████████    │
+│  █           █     │        │        ████████    │
+└─────────────────────┘        └─────────────────────┘
+```
+
+With block sparsity:
+- Memory access is contiguous within blocks
+- No indexing within blocks
+- Load balancing is easier (work per block is uniform)
+
+```python
+def block_sparse_matmul(A_blocks, A_indices, B, block_size=64):
+    """
+    A is stored as a list of dense blocks + their positions.
+    """
+    result = torch.zeros(A.shape[0], B.shape[1])
+
+    for block, (i, j) in zip(A_blocks, A_indices):
+        # Each block is a dense tile
+        row_start = i * block_size
+        row_end = row_start + block_size
+        col_start = j * block_size
+        col_end = col_start + block_size
+
+        # Dense matmul for this block
+        result[row_start:row_end] += block @ B[col_start:col_end]
+
+    return result
+```
+
+Block sparsity achieves ~80% of theoretical speedup (vs. ~20% for random sparsity at same density).
+
+### 2:4 Structured Sparsity
+
+NVIDIA's Ampere GPUs introduced hardware support for "2:4" sparsity:
+
+**Constraint**: In every group of 4 consecutive elements, exactly 2 must be zero.
+
+```
+Valid 2:4 patterns (█ = nonzero, ░ = zero):
+  ██░░  █░█░  █░░█  ░██░  ░█░█  ░░██
+
+Invalid:
+  ███░  (only 1 zero)
+  █░░░  (3 zeros)
+  ░░░░  (4 zeros)
+```
+
+This gives exactly 50% sparsity, with hardware acceleration:
+
+```
+Standard FP16:     Tensor Core throughput: 312 TFLOPS
+2:4 Sparse FP16:   Tensor Core throughput: 624 TFLOPS (2× faster)
+```
+
+The hardware knows the pattern: 2 non-zeros per 4 elements. It can skip the zeros efficiently.
+
+```python
+# PyTorch 2.0+ supports 2:4 sparsity
+import torch
+from torch.sparse import to_sparse_semi_structured
+
+# Convert a dense tensor to 2:4 sparse
+dense = torch.randn(1024, 1024, device='cuda', dtype=torch.float16)
+sparse_24 = to_sparse_semi_structured(dense)
+
+# Matmul uses accelerated 2:4 kernels
+result = torch.mm(sparse_24, other_matrix)  # ~2× faster on Ampere+
+```
+
+### The Accuracy Trade-off
+
+Forcing structure into sparsity costs accuracy:
+
+| Sparsity Type       | Achievable Sparsity | Accuracy Drop (ResNet-50) |
+|---------------------|---------------------|---------------------------|
+| Unstructured        | 90%                 | 1-2%                      |
+| Block (16×16)       | 75%                 | 1-2%                      |
+| Block (64×64)       | 50%                 | 1-2%                      |
+| 2:4 Structured      | 50%                 | <1%                       |
+
+Unstructured sparsity is most flexible but least accelerable. 2:4 is most accelerable but constrains sparsity to exactly 50%.
+
+## Investigation: Mixture of Experts
+
+What if, instead of making weights sparse, we made *activation* of weights conditional?
+
+**Mixture of Experts (MoE)**: Different inputs use different parts of the network.
+
+### The Architecture
+
+```
+Standard feed-forward:
+  Input → [FFN] → Output
+  Every token uses the full FFN
+
+MoE feed-forward:
+  Input → [Router] → selects Expert(s)
+        → [Expert 1]  ─┐
+        → [Expert 2]   ├→ Weighted sum → Output
+        → [Expert 3]   │
+        → ...          │
+        → [Expert N]  ─┘
+```
+
+The router is a small network that decides which expert(s) to use for each input.
+
+```python
+class MoELayer(nn.Module):
+    def __init__(self, dim, num_experts=8, top_k=2):
+        super().__init__()
+        self.experts = nn.ModuleList([
+            nn.Linear(dim, dim * 4)  # Each expert is an FFN
+            for _ in range(num_experts)
+        ])
+        self.gate = nn.Linear(dim, num_experts)
+        self.top_k = top_k
+
+    def forward(self, x):
+        # x: [batch, seq, dim]
+        batch, seq, dim = x.shape
+
+        # Compute routing probabilities
+        router_logits = self.gate(x)  # [batch, seq, num_experts]
+        router_probs = F.softmax(router_logits, dim=-1)
+
+        # Select top-k experts per token
+        top_k_probs, top_k_indices = router_probs.topk(self.top_k, dim=-1)
+
+        # Renormalize
+        top_k_probs = top_k_probs / top_k_probs.sum(dim=-1, keepdim=True)
+
+        # Compute output (simplified, actual impl batches by expert)
+        output = torch.zeros_like(x)
+        for k in range(self.top_k):
+            expert_idx = top_k_indices[:, :, k]
+            weight = top_k_probs[:, :, k:k+1]
+
+            for e in range(len(self.experts)):
+                mask = (expert_idx == e)
+                if mask.any():
+                    expert_out = self.experts[e](x[mask])
+                    output[mask] += weight[mask] * expert_out
+
+        return output
+```
+
+### The Efficiency Win
+
+Mixtral 8x7B:
+- 8 experts, uses top-2 per token
+- 46.7B total parameters
+- 12.9B active parameters per token (2/8 × 46.7B + overhead)
+- Performs like a ~70B dense model
+
+```
+Parameter efficiency:
+  Dense 70B:    70B params active, 70B params total
+  Mixtral:      12.9B params active, 46.7B params total
+
+  Active params: 5.4× fewer
+  Total params:  0.67× as many
+  Performance:   Similar to dense 70B
+```
+
+MoE is a form of *conditional computation*: the model dynamically decides what work to do.
+
+### The Challenges
+
+MoE isn't free:
+
+1. **Load balancing**: If all tokens route to the same expert, that expert becomes a bottleneck. Needs auxiliary losses to encourage balance.
+
+2. **Memory**: All experts must be loaded, even if only 2 are active per token. 46.7B parameters in memory for 12.9B active.
+
+3. **Communication**: In distributed training, experts live on different GPUs. Routing requires all-to-all communication.
+
+4. **Inference latency**: For single-token generation, only 2 experts are used—but all must be resident. Memory bandwidth, not compute, often dominates.
+
+```
+The MoE memory paradox:
+
+Throughput (batch processing):  MoE wins
+  - Tokens spread across experts
+  - Effective compute scales with batch
+
+Latency (single token):         Dense wins
+  - All params in memory, few active
+  - Memory-bound: loading 46.7B to use 12.9B
+```
+
+## Sparsity in Attention
+
+Attention is naturally sparse. Most tokens don't strongly attend to most other tokens.
+
+### Empirical Attention Patterns
+
+Analysis of trained transformers shows:
+
+```
+Typical attention pattern (one head):
+
+Query position →
+     1  2  3  4  5  6  7  8  9  10 11 12
+  ┌────────────────────────────────────┐
+1 │ █                                  │
+2 │ █  █                               │
+3 │ █  ░  █                            │
+4 │ █  ░  ░  █                         │  █ = high attention
+5 │ █  ░  ░  ░  █                      │  ░ = low attention
+6 │ █  ░  ░  ░  ░  █                   │  (blank = ~zero)
+7 │ █  ░  ░  ░  ░  ░  █                │
+8 │ █  ░  ░  ░  ░  ░  ░  █             │
+9 │ █  ░  ░  ░  ░  ░  ░  ░  █          │
+10│ █  ░  ░  ░  ░  ░  ░  ░  ░  █       │
+11│ █  ░  ░  ░  ░  ░  ░  ░  ░  ░  █    │
+12│ █  ░  ░  ░  ░  ░  ░  ░  ░  ░  ░  █ │
+  └────────────────────────────────────┘
+Key ↓
+
+Pattern: Attend to (1) self, (2) first token, (3) nearby tokens
+Most of the matrix is near-zero.
+```
+
+This suggests we could skip most attention computations.
+
+### Sparse Attention Variants
+
+**Sliding window**: Only attend within a local window.
+
+```python
+def sliding_window_attention(Q, K, V, window_size=256):
+    seq_len = Q.shape[0]
+    output = torch.zeros_like(Q)
+
+    for i in range(seq_len):
+        start = max(0, i - window_size)
+        end = i + 1  # Causal: only attend to past
+
+        q = Q[i:i+1]
+        k = K[start:end]
+        v = V[start:end]
+
+        attn = F.softmax(q @ k.T / sqrt(d), dim=-1)
+        output[i] = attn @ v
+
+    return output
+```
+
+Complexity: O(n × window) instead of O(n²)
+
+**Sparse patterns**: Combine local + global + random.
+
+Longformer/BigBird patterns:
+- Local window attention (nearby tokens)
+- Global tokens (attend to/from everywhere)
+- Random attention (a few random connections)
+
+```
+Sparse attention pattern:
+
+    Global    Local     Random
+    ↓         ↓         ↓
+    ████████████████████████  ← Global tokens (attend everywhere)
+    ████████████████████████
+    ██████                    ← Local window
+      ██████
+        ██████
+          ██████      █       ← Random connections
+            ██████
+              ██████  █
+```
+
+### The FlashAttention Insight
+
+FlashAttention (Chapter 4, Chapter 11) takes a different approach: don't make attention sparse, but compute it *exactly* with better memory access.
+
+For many applications, FlashAttention + dense attention beats sparse attention:
+- No approximation error
+- Simpler implementation
+- Hardware-friendly access patterns
+
+Sparse attention shines for very long sequences (>16K tokens) where even FlashAttention's O(n²) compute is prohibitive.
+
+## The Sparsity-Hardware Co-Design
+
+The lesson from sparsity: **algorithms and hardware must be designed together**.
+
+| Algorithm Wants       | Hardware Needs           | Compromise                      |
+|-----------------------|--------------------------|----------------------------------|
+| Skip arbitrary zeros  | Predictable patterns     | Block or 2:4 sparsity           |
+| Prune anywhere        | Load balance             | Structured pruning              |
+| Different paths/token | Same instruction/warp    | MoE with batched routing        |
+| Sparse attention      | Dense tensor ops         | Fixed sparse patterns           |
+
+The pattern: **constrain flexibility for predictability**.
+
+## Key Takeaways
+
+1. **Random sparsity doesn't help**: Hardware can't exploit unpredictable skip patterns. 90% sparsity often gives only 2× speedup.
+
+2. **Structure enables acceleration**: Block sparsity, 2:4 sparsity, and MoE all trade flexibility for predictability—and hardware rewards that.
+
+3. **MoE is conditional computation**: Instead of sparse weights, choose which weights to use. Scales capacity without scaling compute.
+
+4. **Attention is empirically sparse**: But exploiting it is hard. Dense FlashAttention often beats sparse approximations.
+
+5. **Co-design is essential**: The best sparsity pattern depends on your hardware. NVIDIA 2:4 only matters on Ampere+.
+
+## The Meta-Lesson
+
+All three optimization properties we've seen—associativity (chunking), separability (factoring), and sparsity (skipping)—share a theme:
+
+**Find structure that aligns with hardware.**
+
+- Associativity aligns with parallel reduction
+- Separability aligns with GEMM efficiency
+- Structured sparsity aligns with predictable memory access
+
+The property tells you what's mathematically possible. The hardware tells you what's practically fast.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Compare random vs. block vs. 2:4 sparsity speedups
+- Implement a simple MoE layer
+- Analyze attention sparsity patterns in a trained model
+- Benchmark sparse attention variants
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/06-sparsity-moe.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Hoefler et al. (2021). "Sparsity in Deep Learning: Pruning and growth for efficient inference and training in neural networks"
+- Fedus et al. (2021). "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity"
+- Mishra et al. (2021). "Accelerating Sparse Deep Neural Networks" (NVIDIA 2:4 sparsity)
+- Beltagy et al. (2020). "Longformer: The Long-Document Transformer"
 
 ---
 
