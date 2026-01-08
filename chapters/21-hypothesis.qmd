@@ -1,22 +1,546 @@
 ---
 title: "The Art of Hypothesis"
 subtitle: "Finding the Bottleneck Before Optimizing"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+George Pólya's first principle of problem-solving: "Understand the problem."
+
+Before you optimize, you must answer: *what* is slow, and *why*?
+
+Getting this wrong means optimizing the wrong thing. Getting this right means the optimization is often obvious.
 :::
 
-## Coming Soon
+## The Premature Optimization Trap
 
-This chapter will cover:
+Everyone knows Knuth's quote: "Premature optimization is the root of all evil."
 
-- **Polya's first step**: understand the problem
-- **Diagnostic questions**: What is the bottleneck? What resource is constrained?
-- **The USE method**: Utilization, Saturation, Errors
-- **Following the wrong path** (and learning from it)
+Fewer people know the full quote: "We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil. **Yet we should not pass up our opportunities in that critical 3%.**"
+
+The question is: how do you find that critical 3%?
+
+Not by guessing. By forming and testing hypotheses.
+
+## The Diagnostic Questions
+
+Before writing any optimization code, answer these questions:
+
+### 1. What Is the Bottleneck?
+
+```
+Is your code slow because of:
+  □ CPU computation (compute-bound)
+  □ Memory access (memory-bound)
+  □ I/O operations (I/O-bound)
+  □ Waiting for something (latency-bound)
+  □ Synchronization (lock-bound)
+```
+
+These are mutually exclusive. Optimizing CPU computation when you're memory-bound is waste.
+
+### 2. Where Is the Time Going?
+
+```
+What percentage of time is spent in each component?
+  - 80% in matrix multiply → optimize matmul
+  - 80% in data loading → optimize I/O
+  - 40% here, 30% there, 30% elsewhere → systemic issue
+```
+
+The 80/20 rule is real: 80% of time is usually in 20% of code.
+
+### 3. What Resource Is Constrained?
+
+```
+  Resource        Symptom                    Check
+  ──────────────────────────────────────────────────
+  CPU             100% utilization           top, htop
+  GPU compute     High SM utilization        nvidia-smi, Nsight
+  GPU memory BW   Low SM util, high BW       Roofline analysis
+  Host memory     Swapping, high RSS         free, vmstat
+  GPU memory      OOM errors                 nvidia-smi
+  Disk            High iowait                iostat
+  Network         High bandwidth, latency    iftop, ping
+```
+
+### 4. What Changed?
+
+```
+If it was fast before and is slow now:
+  - What code changed?
+  - What data changed?
+  - What environment changed?
+```
+
+Often the best hypothesis comes from the diff.
+
+## The Hypothesis-Driven Workflow
+
+### Step 1: Observe
+
+Measure without judgment. Just gather data.
+
+```python
+# Initial observation
+import time
+
+start = time.time()
+result = my_function(data)
+elapsed = time.time() - start
+print(f"Total time: {elapsed:.2f}s")
+
+# This tells us: it's slow
+# This doesn't tell us: why
+```
+
+### Step 2: Hypothesize
+
+Form a specific, testable hypothesis.
+
+```
+Bad hypothesis:  "It's slow because it's inefficient."
+                 (Vague, not testable)
+
+Good hypothesis: "It's slow because the inner loop has
+                  cache misses from strided memory access."
+                 (Specific, testable, actionable)
+```
+
+A good hypothesis:
+- Is specific about *what* and *why*
+- Makes a prediction you can test
+- Suggests what to measure
+- Points toward a solution
+
+### Step 3: Test
+
+Design an experiment that could *falsify* your hypothesis.
+
+```python
+# Hypothesis: Cache misses from strided access
+
+# Test 1: Profile cache behavior
+import subprocess
+result = subprocess.run(
+    ['perf', 'stat', '-e', 'cache-misses,cache-references',
+     'python', 'my_script.py'],
+    capture_output=True
+)
+# Check cache miss rate
+
+# Test 2: Compare with sequential access
+def sequential_version(data):
+    # Reorder to access sequentially
+    return process(data.T.contiguous())
+
+time_strided = benchmark(original_version)
+time_sequential = benchmark(sequential_version)
+# If sequential is faster, hypothesis supported
+```
+
+### Step 4: Conclude
+
+Did the evidence support or refute your hypothesis?
+
+```
+Possible outcomes:
+
+1. Hypothesis supported, improvement found
+   → Ship it
+
+2. Hypothesis refuted
+   → Good! You learned something. Form new hypothesis.
+
+3. Inconclusive
+   → Need better measurement. Refine experiment.
+```
+
+### Step 5: Iterate
+
+Performance optimization is rarely one shot. Each conclusion leads to new observations.
+
+```
+Observation: Forward pass is slow
+Hypothesis 1: Memory-bound on attention
+Test: Profile memory bandwidth → Low utilization
+Conclusion: Not memory-bound. Refuted.
+
+Hypothesis 2: Compute-bound on FFN
+Test: Profile compute utilization → 100% on FFN
+Conclusion: Compute-bound. Supported.
+
+Hypothesis 3: FFN is doing redundant work
+Test: Examine FFN code → Unnecessary recomputation
+Conclusion: Yes! Fix it.
+
+Result: 2× speedup
+```
+
+## Case Study: The Slow Training Loop
+
+Let's work through a real debugging session.
+
+### Observation
+
+```python
+# Training loop takes 30 minutes per epoch
+# Expected: 10 minutes per epoch
+# 3× slower than expected
+
+for batch in dataloader:
+    loss = model(batch)
+    loss.backward()
+    optimizer.step()
+```
+
+### Hypothesis 1: GPU Is Underutilized
+
+**Reasoning**: Training is usually GPU-bound. If GPU utilization is low, something is starving it.
+
+**Test**:
+```bash
+watch -n 1 nvidia-smi
+
+# Output:
+# GPU-Util: 30%  ← Very low!
+# Memory:   50%
+```
+
+**Conclusion**: Supported. GPU is only 30% utilized. Something else is the bottleneck.
+
+### Hypothesis 2: Data Loading Is the Bottleneck
+
+**Reasoning**: Low GPU utilization often means CPU can't feed data fast enough.
+
+**Test**:
+```python
+# Profile data loading vs compute
+import time
+
+load_times = []
+compute_times = []
+
+for batch in dataloader:
+    start = time.time()
+    batch = batch.to('cuda')
+    load_times.append(time.time() - start)
+
+    start = time.time()
+    loss = model(batch)
+    loss.backward()
+    optimizer.step()
+    torch.cuda.synchronize()
+    compute_times.append(time.time() - start)
+
+print(f"Load: {sum(load_times):.1f}s, Compute: {sum(compute_times):.1f}s")
+# Output: Load: 25.3s, Compute: 4.7s
+```
+
+**Conclusion**: Supported. Data loading is 5× slower than compute!
+
+### Hypothesis 3: DataLoader Workers Are Insufficient
+
+**Reasoning**: Default is `num_workers=0` (single process). Adding workers enables parallel loading.
+
+**Test**:
+```python
+# Current
+dataloader = DataLoader(dataset, batch_size=32, num_workers=0)
+# Time: 30 min/epoch
+
+# Proposed fix
+dataloader = DataLoader(dataset, batch_size=32, num_workers=4)
+# Time: ???
+
+# Result: 12 min/epoch (2.5× faster)
+```
+
+**Conclusion**: Partially supported. 2.5× faster, but still not 10 min target.
+
+### Hypothesis 4: Pin Memory Is Not Enabled
+
+**Reasoning**: `pin_memory=True` enables faster CPU→GPU transfer.
+
+**Test**:
+```python
+dataloader = DataLoader(
+    dataset,
+    batch_size=32,
+    num_workers=4,
+    pin_memory=True  # ← Add this
+)
+# Time: 10.5 min/epoch
+```
+
+**Conclusion**: Supported. Now at target.
+
+### Summary
+
+```
+Initial: 30 min/epoch
+
+H1: GPU underutilized → Confirmed
+H2: Data loading slow → Confirmed (25s load, 5s compute)
+H3: Need more workers → Partial (30 → 12 min)
+H4: Enable pin_memory → Confirmed (12 → 10.5 min)
+
+Final: 10.5 min/epoch (2.9× faster)
+```
+
+Total optimization time: ~20 minutes of investigation, 2 lines of code changed.
+
+## The USE Method as Hypothesis Generator
+
+Brendan Gregg's USE method (Chapter 20) is also a hypothesis generator:
+
+```
+For each resource, check:
+
+Utilization → "Is X being used heavily?"
+Saturation  → "Is X overwhelmed with queued work?"
+Errors      → "Is X failing?"
+
+Each check either confirms or rules out that resource as the bottleneck.
+```
+
+Systematic application:
+
+```python
+def use_checklist():
+    """Generate hypotheses using USE method"""
+    resources = ['CPU', 'GPU', 'Memory', 'Disk', 'Network']
+
+    for resource in resources:
+        print(f"\n{resource}:")
+        print(f"  Utilization: [measure % busy]")
+        print(f"  Saturation:  [measure queue depth]")
+        print(f"  Errors:      [measure error count]")
+
+        # High utilization + high saturation → bottleneck
+        # High utilization + low saturation → well-utilized
+        # Low utilization → not the bottleneck
+```
+
+## Common Hypothesis Patterns
+
+### Pattern: High Latency, Low Utilization
+
+```
+Symptom:   Operation is slow, but CPU/GPU utilization is low
+Diagnosis: Waiting for something
+
+Common causes:
+  - I/O (disk, network)
+  - Synchronization (locks, barriers)
+  - Memory stalls (cache misses)
+  - Kernel launch overhead (GPU)
+
+Hypothesis template:
+  "The operation is slow because it's waiting for [X]."
+```
+
+### Pattern: High Utilization, High Latency
+
+```
+Symptom:   CPU/GPU at 100%, but still slow
+Diagnosis: Actually compute-bound (doing too much work)
+
+Common causes:
+  - Algorithm complexity too high
+  - Redundant computation
+  - No caching of repeated work
+  - Wrong precision (FP64 instead of FP16)
+
+Hypothesis template:
+  "The operation is compute-bound because [X]."
+```
+
+### Pattern: Memory Usage Grows Over Time
+
+```
+Symptom:   Memory increases during execution
+Diagnosis: Memory leak or accumulation
+
+Common causes:
+  - Accumulating tensors in list
+  - Computation graph not freed (loss.item() not called)
+  - Cache not bounded
+
+Hypothesis template:
+  "Memory is accumulating because [X] is not being freed."
+```
+
+### Pattern: GPU Memory Full, Low Compute
+
+```
+Symptom:   GPU memory near limit, but SM utilization low
+Diagnosis: Memory-bound or wrong batch size
+
+Common causes:
+  - Batch size too small (underutilizing compute)
+  - Memory-bound kernels (need algorithmic change)
+  - Fragmentation (need memory pool)
+
+Hypothesis template:
+  "GPU is underutilized because [memory/batch size issue]."
+```
+
+## The Roofline as Hypothesis Framework
+
+The roofline model (Chapter 2) provides a structured way to generate hypotheses:
+
+```
+          Peak Compute ─────────────────────────────────
+                       ╱
+                      ╱
+                     ╱ Memory-bound region
+                    ╱
+                   ╱
+        ─────────╱───────────────────────────────────────
+                ↑
+          Ridge point (balance point)
+
+Your operation is either:
+  - Left of ridge: memory-bound → optimize memory access
+  - Right of ridge: compute-bound → optimize computation
+  - Below roofline: inefficient → optimize implementation
+```
+
+This immediately suggests hypotheses:
+
+```python
+def roofline_hypothesis(measured_flops, measured_bandwidth, peak_flops, peak_bw):
+    """Generate hypothesis from roofline position"""
+    ridge_point = peak_flops / peak_bw  # FLOPs/byte
+
+    arithmetic_intensity = measured_flops / measured_bandwidth
+
+    if arithmetic_intensity < ridge_point:
+        return ("Memory-bound. Hypotheses:\n"
+                "  1. Improve data reuse (tiling)\n"
+                "  2. Reduce data movement (fusion)\n"
+                "  3. Use lower precision (quantization)")
+    else:
+        return ("Compute-bound. Hypotheses:\n"
+                "  1. Reduce operations (algorithm change)\n"
+                "  2. Use specialized hardware (tensor cores)\n"
+                "  3. Increase parallelism")
+```
+
+## When Hypotheses Fail
+
+Sometimes your hypothesis is wrong. That's good—you learned something.
+
+### Wrong Hypothesis: "It's Compute-Bound"
+
+```python
+# Hypothesis: Matrix multiply is slow because of compute
+# Test: Profile compute utilization
+# Result: 20% GPU utilization
+
+# Hypothesis refuted. It's NOT compute-bound.
+# New hypothesis needed.
+```
+
+### Wrong Hypothesis: "It's a Slow Function"
+
+```python
+# Hypothesis: slow_function() is the bottleneck
+# Test: Remove slow_function(), measure total time
+# Result: No change (!)
+
+# Hypothesis refuted. slow_function() isn't on critical path.
+# Maybe it's running in parallel with something else.
+```
+
+### Wrong Hypothesis: "The Fix Will Help"
+
+```python
+# Hypothesis: Vectorization will speed up the loop
+# Test: Vectorize and benchmark
+# Result: 2% slower (!)
+
+# Hypothesis refuted. Why?
+# Investigation: Vectorized version uses more memory,
+# causes cache eviction, memory becomes bottleneck.
+```
+
+Each failed hypothesis teaches you about the system.
+
+## The Art of Good Hypotheses
+
+### Be Specific
+
+```
+Bad:  "It's slow."
+Good: "The forward pass is slow because attention is recomputing
+       softmax for cached values."
+```
+
+### Be Quantitative
+
+```
+Bad:  "Memory is high."
+Good: "Memory usage is 15GB, expected 8GB. The 7GB excess is
+       in the optimizer states (checked with memory snapshot)."
+```
+
+### Be Mechanistic
+
+```
+Bad:  "The GPU is slow."
+Good: "The GPU is underutilized because kernel launches are
+       serialized through a single CUDA stream."
+```
+
+### Be Falsifiable
+
+```
+Bad:  "The code is inefficient."
+       (How would you prove this wrong?)
+
+Good: "The code is doing 2× more FLOPs than necessary due to
+       recomputation of X."
+       (Count the FLOPs, compare to optimal.)
+```
+
+## Key Takeaways
+
+1. **Understand before optimizing**: The wrong optimization is worse than no optimization. Find the bottleneck first.
+
+2. **Form specific hypotheses**: Vague hunches aren't testable. "It's memory-bound because X" is testable.
+
+3. **Test to falsify**: Design experiments that could prove you wrong. That's how you learn.
+
+4. **Iterate**: Each test teaches you something. Use it to form better hypotheses.
+
+5. **Use frameworks**: USE method, roofline model, and systematic checklists generate hypotheses you might miss.
+
+The best performance engineers aren't the ones who optimize the fastest. They're the ones who find the right thing to optimize.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Practice the hypothesis-driven workflow on sample problems
+- Use the USE method checklist
+- Analyze roofline position and generate hypotheses
+- Debug simulated performance issues
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/21-hypothesis.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Pólya (1945). "How to Solve It"
+- Gregg (2020). "Systems Performance" (Chapter 2: Methodologies)
+- Hennessy & Patterson (2017). "Computer Architecture: A Quantitative Approach"
+- The Scientific Method (yes, that one from school)
 
 ---
 

@@ -1,22 +1,598 @@
 ---
 title: "Locality"
 subtitle: "Why Nearby Data Matters"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+You've learned three algebraic properties that enable efficiency: associativity (chunking), separability (factoring), and sparsity (skipping).
+
+But there's a fourth, hidden in plain sight. The most universal.
+
+**Locality**: The property that makes all the others practical.
 :::
 
-## Coming Soon
+## The Cache Hierarchy Reality
 
-This chapter will investigate:
+In Chapter 1, we saw the memory hierarchy:
 
-- **Spatial and temporal locality**
-- **Tiling** to keep working sets in cache
-- **Cache-oblivious algorithms**
-- **Data layout** and its performance implications
+| Level     | Size    | Latency      | Bandwidth    |
+|-----------|---------|--------------|--------------|
+| L1 Cache  | 64 KB   | 1 ns         | 1000+ GB/s   |
+| L2 Cache  | 512 KB  | 4 ns         | 400 GB/s     |
+| L3 Cache  | 32 MB   | 20 ns        | 200 GB/s     |
+| DRAM      | 64 GB   | 100 ns       | 50 GB/s      |
+| SSD       | 1 TB    | 100 µs       | 3 GB/s       |
+
+This hierarchy exists because of a physical reality: fast memory is small, large memory is slow.
+
+But there's good news: we don't access memory randomly. Programs exhibit *locality*.
+
+## Two Kinds of Locality
+
+**Temporal locality**: If you access data now, you'll likely access it again soon.
+
+```python
+# High temporal locality
+total = 0
+for i in range(1000000):
+    total += x  # x accessed 1 million times
+```
+
+**Spatial locality**: If you access data at address X, you'll likely access nearby addresses.
+
+```python
+# High spatial locality
+total = 0
+for i in range(len(array)):
+    total += array[i]  # Sequential access
+```
+
+These patterns aren't accidents—they're what make caches work.
+
+## How Caches Exploit Locality
+
+Caches work by keeping recently-accessed data close to the CPU. The key insight:
+
+**Don't cache individual bytes. Cache entire *cache lines*.**
+
+A cache line is typically 64 bytes. When you access one byte, the hardware fetches the entire 64-byte line containing it.
+
+```
+Memory address:     0    8    16   24   32   40   48   56   64   72
+                    [=========== Cache Line 0 ===========]
+                                                          [=== Cache Line 1 ===]
+
+You request byte 20.
+Hardware fetches bytes 0-63 (entire line).
+Bytes 21-63 are now "free" if you need them.
+```
+
+This transforms spatial locality into speed:
+
+```python
+# Spatial locality wins
+array = [0.0] * 1000000  # 8 bytes per float
+
+# Access pattern 1: Sequential (high spatial locality)
+total = 0
+for i in range(len(array)):
+    total += array[i]
+# Each cache line fetch brings 8 floats. 87.5% "free" data.
+
+# Access pattern 2: Strided (low spatial locality)
+total = 0
+for i in range(0, len(array), 8):
+    total += array[i]
+# Each cache line fetch brings 8 floats. We use 1. 87.5% wasted.
+
+# Access pattern 3: Random (no spatial locality)
+total = 0
+for i in random_indices:
+    total += array[i]
+# Each access may require a new cache line. Maximum waste.
+```
+
+Benchmark results (typical):
+
+| Pattern    | Elements Accessed | Cache Lines Touched | Relative Speed |
+|------------|-------------------|---------------------|----------------|
+| Sequential | 1,000,000         | 125,000             | 1×             |
+| Stride-8   | 125,000           | 125,000             | 0.12×          |
+| Random     | 1,000,000         | ~1,000,000          | 0.05×          |
+
+Random access can be **20× slower** than sequential, even touching the same amount of data.
+
+## The Working Set
+
+Temporal locality has its own key concept: the *working set*.
+
+**Working set**: The data your computation actively uses over some time window.
+
+```python
+# Small working set (fits in L1)
+def dot_product(a, b):  # a, b are 1000 floats = 8 KB
+    total = 0
+    for i in range(len(a)):
+        total += a[i] * b[i]
+    return total
+# Working set: ~16 KB. Fits in L1 cache. Fast.
+
+# Large working set (exceeds all caches)
+def dot_product_huge(a, b):  # a, b are 100M floats = 800 MB each
+    total = 0
+    for i in range(len(a)):
+        total += a[i] * b[i]
+    return total
+# Working set: ~1.6 GB. Must stream from DRAM. Slow.
+```
+
+The rule: **If your working set fits in cache, you get cache-speed performance.**
+
+## Tiling: Engineering Locality
+
+What if your data doesn't naturally fit in cache? You *make* it fit.
+
+**Tiling** (also called blocking): Divide work into chunks that fit in cache, process each chunk completely before moving on.
+
+### Matrix Multiply: The Canonical Example
+
+Naive matrix multiply:
+
+```python
+def matmul_naive(A, B, C):
+    """C = A @ B, where A is M×K, B is K×N, C is M×N"""
+    M, K = A.shape
+    K, N = B.shape
+
+    for i in range(M):
+        for j in range(N):
+            for k in range(K):
+                C[i, j] += A[i, k] * B[k, j]
+```
+
+For 1024×1024 matrices:
+- A: 8 MB
+- B: 8 MB
+- C: 8 MB
+- Total: 24 MB
+
+None fit in typical L2 (512 KB) or L3 (32 MB barely).
+
+Watch the memory access pattern:
+
+```
+Computing C[0,0]:
+  Need A[0,:] (entire row) → 8 KB, sequential
+  Need B[:,0] (entire column) → 8 KB, strided by 1024!
+
+Computing C[0,1]:
+  Need A[0,:] (same row) → hopefully still cached
+  Need B[:,1] (next column) → 8 KB, strided again
+
+After finishing row 0 of C:
+  A[0,:] is evicted, will need it again? No.
+  But B's columns keep thrashing cache.
+```
+
+The problem: B is accessed in column-major order but stored row-major. Every element of B[:,j] is 1024 elements (8 KB) apart.
+
+### Tiled Matrix Multiply
+
+```python
+def matmul_tiled(A, B, C, tile_size=64):
+    """C = A @ B with tiling for cache efficiency"""
+    M, K = A.shape
+    K, N = B.shape
+
+    # Process in tile_size × tile_size blocks
+    for i0 in range(0, M, tile_size):
+        for j0 in range(0, N, tile_size):
+            for k0 in range(0, K, tile_size):
+                # Compute one tile of C
+                for i in range(i0, min(i0 + tile_size, M)):
+                    for j in range(j0, min(j0 + tile_size, N)):
+                        for k in range(k0, min(k0 + tile_size, K)):
+                            C[i, j] += A[i, k] * B[k, j]
+```
+
+Tile size = 64: Each tile is 64×64 = 4096 elements = 32 KB.
+
+Working set per tile computation:
+- A tile: 32 KB
+- B tile: 32 KB
+- C tile: 32 KB
+- Total: 96 KB
+
+Fits comfortably in L2 cache (512 KB).
+
+The speedup:
+
+```
+Matrix size: 1024×1024
+
+Naive:  1,000 ms
+Tiled:  200 ms (5× faster)
+BLAS:   20 ms (50× faster, more optimizations)
+```
+
+Tiling transforms a memory-bound problem into a compute-bound one.
+
+### Choosing Tile Size
+
+Tile size is a tuning parameter:
+
+| Tile Size | Working Set | Cache Level | Tradeoff                    |
+|-----------|-------------|-------------|-----------------------------|
+| 16×16     | 6 KB        | L1          | Maximum locality, more tiles|
+| 32×32     | 24 KB       | L1/L2       | Good balance                |
+| 64×64     | 96 KB       | L2          | Common choice               |
+| 128×128   | 384 KB      | L2/L3       | Fewer tiles, may spill      |
+
+The optimal depends on your specific CPU's cache sizes and architecture.
+
+```python
+def find_optimal_tile_size(M, K, N):
+    """Heuristic for tile size selection"""
+    # Aim for working set to fit in L2
+    L2_size = 512 * 1024  # 512 KB, typical
+
+    # Working set: 3 tiles × tile_size² × 8 bytes
+    # 3 × tile² × 8 ≤ L2_size
+    # tile² ≤ L2_size / 24
+    # tile ≤ sqrt(L2_size / 24)
+
+    max_tile = int((L2_size / 24) ** 0.5)
+
+    # Round down to power of 2 for alignment
+    tile = 1
+    while tile * 2 <= max_tile:
+        tile *= 2
+
+    return tile  # Typically 64 or 128
+```
+
+## Data Layout: AoS vs SoA
+
+Locality isn't just about algorithms—it's about how you organize data.
+
+**Array of Structures (AoS)**:
+
+```python
+# Each particle stored together
+class Particle:
+    x: float
+    y: float
+    z: float
+    vx: float
+    vy: float
+    vz: float
+    mass: float
+
+particles = [Particle() for _ in range(1000000)]
+```
+
+Memory layout:
+```
+[x0 y0 z0 vx0 vy0 vz0 m0] [x1 y1 z1 vx1 vy1 vz1 m1] [x2...]
+```
+
+**Structure of Arrays (SoA)**:
+
+```python
+# Each property stored together
+class ParticleSystem:
+    x: List[float]   # All x positions
+    y: List[float]   # All y positions
+    z: List[float]   # All z positions
+    vx: List[float]  # All x velocities
+    vy: List[float]  # All y velocities
+    vz: List[float]  # All z velocities
+    mass: List[float]
+```
+
+Memory layout:
+```
+[x0 x1 x2 x3...] [y0 y1 y2...] [z0 z1 z2...] [vx0 vx1...]
+```
+
+Which is better? **Depends on access pattern.**
+
+```python
+# Operation 1: Update all positions based on velocity
+# SoA wins!
+for i in range(n):
+    particles.x[i] += particles.vx[i] * dt
+    particles.y[i] += particles.vy[i] * dt
+    particles.z[i] += particles.vz[i] * dt
+# Accesses x[], vx[], y[], vy[], z[], vz[] sequentially
+# Each array is contiguous. Perfect spatial locality.
+
+# Operation 2: Render each particle (need all properties)
+# AoS wins!
+for p in particles:
+    render(p.x, p.y, p.z, p.mass)
+# All properties of one particle are contiguous.
+# One cache line per particle (if small enough).
+```
+
+Real-world heuristic:
+
+- **SoA**: When you process all elements but only some fields (vectorizable loops)
+- **AoS**: When you process all fields of selected elements (object-oriented access)
+
+Modern ML frameworks use SoA extensively. Tensors are stored contiguously by dimension:
+
+```python
+# PyTorch tensor: conceptually 2D, stored as 1D
+tensor = torch.randn(1000, 768)  # 1000 tokens × 768 dimensions
+
+# Memory layout (row-major):
+# [t0_d0 t0_d1 ... t0_d767] [t1_d0 t1_d1 ... t1_d767] ...
+
+# Operations on entire dimensions are fast:
+mean_per_token = tensor.mean(dim=1)  # Sequential access along dim 1
+```
+
+## Cache-Oblivious Algorithms
+
+Tiling requires knowing cache sizes. But:
+- Different machines have different cache sizes
+- You have multiple cache levels
+- The optimal tile size varies
+
+**Cache-oblivious algorithms**: Algorithms that are cache-efficient without needing to know cache parameters.
+
+The idea: Use recursion that *automatically* creates good locality at all scales.
+
+### Cache-Oblivious Matrix Multiply
+
+Instead of explicit tiles, recursively divide:
+
+```python
+def matmul_recursive(A, B, C):
+    """Cache-oblivious matrix multiply"""
+    n = A.shape[0]
+
+    # Base case: small enough to compute directly
+    if n <= 64:  # Some threshold
+        C += A @ B  # Use whatever's efficient for small matrices
+        return
+
+    # Divide into quadrants
+    mid = n // 2
+
+    A11, A12 = A[:mid, :mid], A[:mid, mid:]
+    A21, A22 = A[mid:, :mid], A[mid:, mid:]
+    B11, B12 = B[:mid, :mid], B[:mid, mid:]
+    B21, B22 = B[mid:, :mid], B[mid:, mid:]
+    C11, C12 = C[:mid, :mid], C[:mid, mid:]
+    C21, C22 = C[mid:, :mid], C[mid:, mid:]
+
+    # 8 recursive multiplications (Strassen uses 7)
+    matmul_recursive(A11, B11, C11)
+    matmul_recursive(A12, B21, C11)
+    matmul_recursive(A11, B12, C12)
+    matmul_recursive(A12, B22, C12)
+    matmul_recursive(A21, B11, C21)
+    matmul_recursive(A22, B21, C21)
+    matmul_recursive(A21, B12, C22)
+    matmul_recursive(A22, B22, C22)
+```
+
+Why this works:
+
+1. At some recursion depth, subproblems fit in L1 cache
+2. At a higher depth, subproblems fit in L2 cache
+3. And so on up the hierarchy
+
+The algorithm doesn't need to know where these boundaries are. It just recursively divides until the problem is "small enough" at every cache level.
+
+```
+Problem size:  1024×1024 → 512×512 → 256×256 → 128×128 → 64×64
+Working set:   24 MB     → 6 MB    → 1.5 MB  → 384 KB  → 96 KB
+Cache fit:     None      → None    → L3      → L2      → L1
+```
+
+Cache-oblivious algorithms provide near-optimal cache behavior without tuning.
+
+### The Z-Order (Morton) Trick
+
+For cache-oblivious algorithms to work well, we need the data layout to match the recursive structure.
+
+**Z-order (Morton) layout**: Store matrix elements in the order they'd be visited by recursive subdivision.
+
+```
+Row-major layout:          Z-order layout:
+┌───┬───┬───┬───┐          ┌───┬───┬───┬───┐
+│ 0 │ 1 │ 2 │ 3 │          │ 0 │ 1 │ 4 │ 5 │
+├───┼───┼───┼───┤          ├───┼───┼───┼───┤
+│ 4 │ 5 │ 6 │ 7 │          │ 2 │ 3 │ 6 │ 7 │
+├───┼───┼───┼───┤          ├───┼───┼───┼───┤
+│ 8 │ 9 │10 │11 │          │ 8 │ 9 │12 │13 │
+├───┼───┼───┼───┤          ├───┼───┼───┼───┤
+│12 │13 │14 │15 │          │10 │11 │14 │15 │
+└───┴───┴───┴───┘          └───┴───┴───┴───┘
+
+Visit order:               Visit order:
+0→1→2→3→4→5→...            0→1→2→3→4→5→6→7→...
+(row by row)               (Z pattern, recursive)
+```
+
+With Z-order:
+- Any quadrant is contiguous in memory
+- Recursive subdivision always accesses contiguous memory
+- Spatial locality is maintained at every recursion level
+
+The cost: Indexing is more complex (requires bit interleaving).
+
+## Prefetching: Helping the Hardware
+
+Modern CPUs try to predict what you'll access next and prefetch it.
+
+**Hardware prefetching**: CPU detects sequential or strided patterns and fetches ahead.
+
+```
+Access pattern:  addr, addr+64, addr+128, addr+192, ...
+CPU thinks:      "Sequential! Prefetch addr+256, addr+320, ..."
+```
+
+This only works for predictable patterns. Random access defeats prefetching.
+
+**Software prefetching**: Explicitly tell the CPU what to fetch.
+
+```c
+// C with compiler intrinsics
+void process(float* data, int n) {
+    for (int i = 0; i < n; i++) {
+        // Prefetch 8 iterations ahead
+        __builtin_prefetch(&data[i + 8], 0, 3);
+
+        process_element(data[i]);
+    }
+}
+```
+
+```python
+# Python can't do this directly, but NumPy/PyTorch
+# operations are designed to enable hardware prefetching
+# through sequential access patterns.
+```
+
+When prefetching helps:
+- Access pattern is predictable but not sequential
+- Processing time per element is long enough to hide prefetch latency
+
+When prefetching hurts:
+- Random access (prefetches are wasted)
+- Very fast per-element processing (prefetch overhead dominates)
+
+## Locality in Neural Networks
+
+Modern neural networks are designed around locality.
+
+### Convolutions: Local Spatial Locality
+
+```python
+# 2D convolution: each output depends on local input region
+for y in range(H_out):
+    for x in range(W_out):
+        output[y, x] = sum(
+            input[y+dy, x+dx] * kernel[dy, dx]
+            for dy in range(K) for dx in range(K)
+        )
+```
+
+The kernel slides across the input. At each position:
+- Input access is spatially local (3×3 or 5×5 region)
+- Kernel is reused across all positions (temporal locality)
+
+### Attention: The Locality Challenge
+
+Self-attention is problematic for locality:
+
+```python
+# Every token attends to every other token
+for i in range(seq_len):
+    for j in range(seq_len):
+        attn[i, j] = query[i] @ key[j].T
+```
+
+For sequence length N:
+- Working set: O(N²) attention matrix
+- At N=2048: 16 MB attention matrix
+
+This is why FlashAttention (Chapter 11) uses tiling—to restore locality to attention.
+
+### Batch Size and Locality
+
+Larger batches improve locality:
+
+```python
+# Single sample: weights loaded once per sample
+for sample in batch:
+    output = model(sample)  # Load weights, compute, evict
+
+# Batched: weights loaded once per batch
+output = model(batch)  # Load weights once, reuse across batch
+```
+
+Weight reuse scales with batch size. This is why training uses large batches.
+
+## The Locality Principle
+
+All four properties we've studied—associativity, separability, sparsity, and locality—are strategies for the same goal:
+
+**Keep the data you need close to where you compute.**
+
+| Property       | How It Helps Locality                              |
+|----------------|---------------------------------------------------|
+| Associativity  | Enables chunking → fits working set in cache      |
+| Separability   | Reduces dimensionality → smaller working sets     |
+| Sparsity       | Skips zeros → touches less memory                 |
+| Locality       | Directly optimizes access patterns                |
+
+They're not independent. FlashAttention uses:
+- Associativity (streaming softmax)
+- Locality (tiling Q, K, V)
+
+LoRA uses:
+- Separability (low-rank factorization)
+- Locality (smaller matrices fit in cache)
+
+Quantization uses:
+- Sparsity (fewer bits, less memory)
+- Locality (smaller data, better cache utilization)
+
+## Key Takeaways
+
+1. **Locality enables caching**: Modern hardware is built around the assumption that access patterns have locality. Violate this, and you get memory-bound performance.
+
+2. **Tiling creates locality**: If your working set is too large, tile your computation to process cache-sized chunks.
+
+3. **Data layout matters**: AoS vs SoA can mean 10× performance difference depending on access patterns.
+
+4. **Cache-oblivious algorithms are elegant**: Recursive divide-and-conquer automatically adapts to all cache levels without tuning.
+
+5. **All efficiency properties serve locality**: Chunking, factoring, and skipping are all strategies to keep working sets small and access patterns predictable.
+
+## The Synthesis
+
+We've now covered the four fundamental properties that make efficient algorithms possible:
+
+1. **Associativity**: Enables parallel and streaming computation (Chapter 4)
+2. **Separability**: Enables low-rank approximations and factorization (Chapter 5)
+3. **Sparsity**: Enables conditional computation and skipping (Chapter 6)
+4. **Locality**: Enables cache efficiency and tiling (this chapter)
+
+These aren't just theoretical curiosities. They're the building blocks of every efficient algorithm in this book.
+
+In Part III, we'll see how masters wield these properties. We'll investigate matrix multiply, FlashAttention, LoRA, and quantization—watching how each exploits multiple properties in concert.
+
+The art of performance is recognizing which properties your problem has, and designing algorithms that exploit them on real hardware.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Measure cache effects with different access patterns
+- Implement and benchmark tiled matrix multiply
+- Compare AoS vs SoA performance
+- Visualize cache hit rates with different tile sizes
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/07-locality-tiling.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Frigo et al. (1999). "Cache-Oblivious Algorithms"
+- Drepper (2007). "What Every Programmer Should Know About Memory"
+- Goto & Van De Geijn (2008). "Anatomy of High-Performance Matrix Multiplication"
+- Williams et al. (2009). "Roofline: An Insightful Visual Performance Model"
 
 ---
 

@@ -1,23 +1,629 @@
 ---
 title: "Investigation: Matrix Multiply"
 subtitle: "Why This Operation Rules Modern Computing"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+Two matrix multiply implementations. Same algorithm. Same hardware. Same inputs.
+
+One takes 8 seconds. The other takes 40 milliseconds.
+
+That's a **200× difference**. How?
 :::
 
-## Coming Soon
+## The Setup
 
-This investigation will:
+We have two 2048×2048 matrices of 32-bit floats. We want to compute their product.
 
-- Start with **two implementations** that differ by 200×
-- **Profile** to understand the bottleneck
-- Discover the **tiling** insight
-- Connect to the **roofline model**
-- Explain why **neural networks are designed around GEMM**
+```python
+import numpy as np
+
+M = K = N = 2048
+A = np.random.randn(M, K).astype(np.float32)
+B = np.random.randn(K, N).astype(np.float32)
+C = np.zeros((M, N), dtype=np.float32)
+```
+
+Data sizes:
+- A: 2048 × 2048 × 4 bytes = 16 MB
+- B: 2048 × 2048 × 4 bytes = 16 MB
+- C: 2048 × 2048 × 4 bytes = 16 MB
+- Total: 48 MB
+
+Operations required:
+- Each of 2048² output elements requires 2048 multiply-adds
+- Total: 2048³ × 2 = 17.2 billion FLOPs
+
+## Implementation 1: The Naive Approach
+
+```python
+def matmul_naive(A, B, C):
+    M, K = A.shape
+    _, N = B.shape
+    for i in range(M):
+        for j in range(N):
+            for k in range(K):
+                C[i, j] += A[i, k] * B[k, j]
+    return C
+```
+
+Let's trace what happens for each output element:
+
+```
+Computing C[0, 0]:
+  for k in range(2048):
+      C[0, 0] += A[0, k] * B[k, 0]
+
+  A accesses: A[0,0], A[0,1], A[0,2], ... A[0,2047]
+              → Sequential along row. Good!
+
+  B accesses: B[0,0], B[1,0], B[2,0], ... B[2047,0]
+              → Strided by 2048 elements (8 KB). Terrible!
+```
+
+The problem is **B's access pattern**. In row-major storage:
+
+```
+B in memory:
+[B[0,0] B[0,1] B[0,2] ... B[0,2047]] [B[1,0] B[1,1] ... B[1,2047]] ...
+
+Accessing B[:,0] means jumping 2048 elements (8 KB) between accesses.
+Each access is a cache miss. We touch 2048 cache lines to read one column.
+```
+
+### Benchmark
+
+```
+Naive Python:     ~800 seconds (too slow, Numba version)
+Naive Numba:      ~8 seconds
+Expected:         2048³ × 2 / (10 GFLOPS) ≈ 1.7 seconds
+```
+
+We're getting only **2 GFLOPS**—far below even single-core theoretical (~15 GFLOPS for modern CPUs).
+
+## Implementation 2: Loop Reordering
+
+Before tiling, let's try a simpler fix: reorder the loops.
+
+```python
+def matmul_reordered(A, B, C):
+    M, K = A.shape
+    _, N = B.shape
+    for i in range(M):
+        for k in range(K):
+            for j in range(N):
+                C[i, j] += A[i, k] * B[k, j]
+    return C
+```
+
+Wait—we just swapped the `j` and `k` loops. Same computation, right?
+
+Mathematically, yes. For hardware, completely different:
+
+```
+Computing partial results for row 0:
+  for k in range(2048):
+      a_val = A[0, k]  # Scalar, stays in register
+      for j in range(2048):
+          C[0, j] += a_val * B[k, j]
+
+  A accesses: A[0,0], A[0,1], ... (one per outer iteration)
+              → Sequential. Good!
+
+  B accesses: B[0,0], B[0,1], B[0,2], ... B[0,2047]
+              then B[1,0], B[1,1], B[1,2], ... B[1,2047]
+              → Sequential along rows. Good!
+
+  C accesses: C[0,0], C[0,1], ... C[0,2047] (each outer iteration)
+              → Sequential along row, repeated. Good!
+```
+
+### Benchmark
+
+```
+Reordered Numba:  ~2 seconds
+Naive Numba:      ~8 seconds
+Speedup:          4×
+```
+
+Just by reordering loops—no algorithmic change—we get 4× speedup.
+
+But we're still at only **8 GFLOPS**. The hardware can do much more.
+
+## Why We're Still Slow
+
+Let's compute the **arithmetic intensity**:
+
+```python
+# Data movement
+bytes_read = (M * K + K * N) * 4  # Read A and B once
+bytes_written = M * N * 4         # Write C once
+total_bytes = bytes_read + bytes_written
+# = (16 + 16 + 16) MB = 48 MB
+
+# Computation
+flops = M * K * N * 2  # multiply-add = 2 ops
+# = 2048³ × 2 = 17.2 billion FLOPs
+
+# Arithmetic intensity
+intensity = flops / total_bytes
+# = 17.2e9 / 48e6 = 358 FLOPs/byte
+```
+
+Wait—358 FLOPs/byte is *extremely* high. We should be compute-bound.
+
+But that calculation assumes we read each input element only once. In our naive loop:
+
+```
+A[i, k] is read once for each j.
+  Total A reads: M × K × N = 2048³ = 8.6 billion
+  Unique A elements: M × K = 4 million
+
+B[k, j] is read once for each i.
+  Total B reads: M × K × N = 2048³ = 8.6 billion
+  Unique B elements: K × N = 4 million
+
+Reuse factor: 2048× for each element
+```
+
+We're reading the same data **2048 times** from memory because it doesn't fit in cache.
+
+The *effective* arithmetic intensity:
+
+```
+Effective bytes moved ≈ 2 × M × K × N × 4 = 68 GB
+Effective intensity = 17.2e9 / 68e9 = 0.25 FLOPs/byte
+```
+
+At 0.25 FLOPs/byte, we're **memory-bound**. The roofline model says:
+
+```
+Peak memory-bound performance = bandwidth × intensity
+                              = 50 GB/s × 0.25 FLOPs/byte
+                              = 12.5 GFLOPS
+```
+
+Our 8 GFLOPS is close to this limit. We can't go faster without improving data reuse.
+
+## Implementation 3: Tiling
+
+The solution: **process in cache-sized blocks**.
+
+```python
+def matmul_tiled(A, B, C, tile_size=64):
+    M, K = A.shape
+    _, N = B.shape
+
+    for i0 in range(0, M, tile_size):
+        for j0 in range(0, N, tile_size):
+            for k0 in range(0, K, tile_size):
+                # Load tiles into (implicit) cache
+                i1 = min(i0 + tile_size, M)
+                j1 = min(j0 + tile_size, N)
+                k1 = min(k0 + tile_size, K)
+
+                # Compute tile contribution to C
+                for i in range(i0, i1):
+                    for k in range(k0, k1):
+                        a_val = A[i, k]
+                        for j in range(j0, j1):
+                            C[i, j] += a_val * B[k, j]
+
+    return C
+```
+
+Why does this work?
+
+```
+Tile size = 64
+Each tile: 64 × 64 × 4 bytes = 16 KB
+
+Per outer iteration:
+  - A tile: 16 KB
+  - B tile: 16 KB
+  - C tile: 16 KB (read-modify-write)
+  - Total: 48 KB
+
+L1 cache: 32-64 KB
+L2 cache: 256-512 KB
+
+Working set fits in L2, often in L1!
+```
+
+Within each tile, we access the same 16 KB of A, B, C for 64³ = 262,144 operations.
+
+### Effective Reuse Analysis
+
+Without tiling:
+```
+A[i,k] read M×N times, stored once → reuse = 1
+B[k,j] read M×N times, stored once → reuse = 1
+```
+
+With tiling (tile size T):
+```
+A[i,k] read (N/T) times, stored once → reuse = N/T = 32×
+B[k,j] read (M/T) times, stored once → reuse = M/T = 32×
+```
+
+Effective data movement drops by ~32×. We're no longer memory-bound.
+
+### Benchmark
+
+```
+Tiled Numba (T=64):  ~400 ms
+Reordered Numba:     ~2 seconds
+Speedup:             5×
+```
+
+Now at **43 GFLOPS**—approaching single-core limits. But BLAS does even better.
+
+## Implementation 4: What BLAS Does
+
+Libraries like OpenBLAS, MKL, and cuBLAS achieve near-peak performance. Here's how:
+
+### 1. Multi-level Tiling
+
+BLAS uses multiple tile sizes for multiple cache levels:
+
+```
+L1 tile:  32 × 32 (fits in L1)
+L2 tile:  128 × 128 (fits in L2)
+L3 tile:  512 × 512 (fits in L3)
+
+Data flows: L3 → L2 → L1 → registers
+Each level maximizes reuse before accessing slower memory.
+```
+
+### 2. Register Tiling
+
+The innermost kernel keeps data in CPU registers:
+
+```
+Inner kernel: 8 × 8 micro-tile
+  - 8 values from A in registers
+  - 8 values from B in registers
+  - 64 accumulators for C in registers
+
+  All 64 multiply-adds use register operands.
+  No memory access in inner loop.
+```
+
+### 3. SIMD Vectorization
+
+Modern CPUs process multiple floats per instruction:
+
+```
+AVX-512:  16 floats per instruction
+AVX2:     8 floats per instruction
+SSE:      4 floats per instruction
+
+Peak: 32+ FLOPs per cycle instead of 2
+```
+
+### 4. Cache-Friendly Packing
+
+Before the main loop, BLAS *repacks* matrices into contiguous blocks:
+
+```python
+def pack_A(A, tile_size):
+    """Rearrange A so each tile is contiguous"""
+    M, K = A.shape
+    packed = []
+    for i0 in range(0, M, tile_size):
+        for k0 in range(0, K, tile_size):
+            tile = A[i0:i0+tile_size, k0:k0+tile_size]
+            packed.append(tile.ravel())  # Flatten tile
+    return np.concatenate(packed)
+```
+
+This ensures:
+- Sequential memory access within tiles
+- No cache conflicts between tiles
+- Perfect prefetching
+
+### 5. Prefetching
+
+BLAS explicitly prefetches the next tile while computing the current one:
+
+```
+Time: |--compute tile 0--|--compute tile 1--|--compute tile 2--|
+Data: |--load tile 0-----|--load tile 1-----|--load tile 2-----|
+                     ↑                  ↑
+                     Prefetch tile 1    Prefetch tile 2
+```
+
+Memory latency is hidden by overlapping with computation.
+
+### BLAS Benchmark
+
+```
+NumPy (calls BLAS):   ~40 ms
+Our best tiled:       ~400 ms
+Speedup:              10×
+
+BLAS GFLOPS:          430 GFLOPS (multi-core)
+Our GFLOPS:           43 GFLOPS (single-core)
+```
+
+## GPU: A Different Beast
+
+GPUs change the game entirely. Let's see why.
+
+### GPU Architecture Recap
+
+```
+GPU (e.g., A100):
+  - 108 Streaming Multiprocessors (SMs)
+  - Each SM: 64 CUDA cores
+  - Total: 6912 cores
+  - Memory bandwidth: 2 TB/s
+  - Peak FP32: 19.5 TFLOPS
+  - SRAM per SM: 192 KB
+  - HBM (main memory): 80 GB
+```
+
+The key insight: GPUs are **massively parallel** but have the same memory hierarchy challenge.
+
+### Naive GPU Matmul
+
+```python
+# One thread per output element
+@cuda.jit
+def matmul_naive_gpu(A, B, C):
+    i, j = cuda.grid(2)
+    if i < C.shape[0] and j < C.shape[1]:
+        acc = 0.0
+        for k in range(A.shape[1]):
+            acc += A[i, k] * B[k, j]
+        C[i, j] = acc
+```
+
+This is slow because:
+1. Each thread independently loads A[i,:] and B[:,j] from global memory
+2. No data sharing between threads
+3. Memory bandwidth saturated, compute idle
+
+### Tiled GPU Matmul (Shared Memory)
+
+```python
+TILE_SIZE = 32
+
+@cuda.jit
+def matmul_tiled_gpu(A, B, C):
+    # Shared memory for tiles
+    sA = cuda.shared.array((TILE_SIZE, TILE_SIZE), dtype=float32)
+    sB = cuda.shared.array((TILE_SIZE, TILE_SIZE), dtype=float32)
+
+    tx = cuda.threadIdx.x
+    ty = cuda.threadIdx.y
+    bx = cuda.blockIdx.x
+    by = cuda.blockIdx.y
+
+    row = by * TILE_SIZE + ty
+    col = bx * TILE_SIZE + tx
+
+    acc = 0.0
+
+    for k0 in range(0, A.shape[1], TILE_SIZE):
+        # Cooperatively load tiles into shared memory
+        if row < A.shape[0] and k0 + tx < A.shape[1]:
+            sA[ty, tx] = A[row, k0 + tx]
+        if k0 + ty < B.shape[0] and col < B.shape[1]:
+            sB[ty, tx] = B[k0 + ty, col]
+
+        cuda.syncthreads()
+
+        # Compute partial result using shared memory
+        for k in range(TILE_SIZE):
+            acc += sA[ty, k] * sB[k, tx]
+
+        cuda.syncthreads()
+
+    if row < C.shape[0] and col < C.shape[1]:
+        C[row, col] = acc
+```
+
+What's happening:
+1. Each thread block loads a tile of A and B into shared memory (fast SRAM)
+2. All 32×32 = 1024 threads in the block share these tiles
+3. Each thread computes one output element using the shared tiles
+4. Tiles are loaded once, used 32× (by each thread in a row/column)
+
+### Tensor Cores
+
+Modern GPUs have dedicated matrix multiply units:
+
+```
+Tensor Core operation:
+  D = A × B + C
+  where A, B are 16×16 matrices (FP16)
+        C, D are 16×16 matrices (FP32)
+
+  One Tensor Core: 256 FLOPs per cycle
+  A100 has 432 Tensor Cores
+  Peak: 312 TFLOPS (FP16) or 156 TFLOPS (TF32)
+```
+
+Tensor Cores are purpose-built for matrix multiply. They achieve 10-20× higher throughput than CUDA cores.
+
+### GPU Benchmark
+
+```
+Size: 2048×2048
+
+Naive GPU:              ~50 ms
+Tiled GPU (shared mem): ~5 ms
+cuBLAS (Tensor Cores):  ~0.5 ms
+
+CPU (single-core):      ~400 ms (our best)
+CPU (NumPy/BLAS):       ~40 ms
+GPU (cuBLAS):           ~0.5 ms
+
+GPU vs CPU speedup:     80×
+```
+
+## Why Neural Networks Love GEMM
+
+Matrix multiplication (GEMM = General Matrix Multiply) underlies almost every neural network operation:
+
+### Fully Connected Layers
+
+```python
+# y = Wx + b
+def linear(x, W, b):
+    return x @ W.T + b
+
+# For batch_size=32, input=768, output=3072:
+# x: [32, 768], W: [3072, 768]
+# This is matmul: [32, 768] × [768, 3072] = [32, 3072]
+```
+
+### Attention
+
+```python
+# Q, K, V projections
+Q = input @ W_Q  # [seq, dim] × [dim, dim]
+K = input @ W_K
+V = input @ W_V
+
+# Attention scores
+scores = Q @ K.T  # [seq, dim] × [dim, seq] = [seq, seq]
+
+# Output
+output = softmax(scores) @ V  # [seq, seq] × [seq, dim]
+```
+
+Five matrix multiplications per attention layer.
+
+### Convolutions
+
+```python
+# im2col transformation converts convolution to matmul
+# Input: [batch, channels, H, W]
+# Kernel: [out_channels, in_channels, kH, kW]
+
+# im2col extracts patches: [batch * H_out * W_out, in_channels * kH * kW]
+# Kernel reshaped: [out_channels, in_channels * kH * kW]
+
+# Convolution becomes matmul:
+# [batch * H_out * W_out, in_channels * kH * kW] × [in_channels * kH * kW, out_channels]
+```
+
+This is why GPUs (and TPUs) are optimized for matrix multiply. A 10× improvement in GEMM is a 10× improvement in neural network training.
+
+## The Properties at Work
+
+Let's identify which properties make fast matrix multiply possible:
+
+### Associativity
+
+```
+C[i,j] = Σ_k A[i,k] × B[k,j]
+
+This sum is associative: we can compute in any order.
+- Tile-by-tile: Σ over tiles, then Σ within tiles
+- Parallel: Different threads compute different partial sums
+```
+
+Associativity enables **tiling and parallelism**.
+
+### Locality
+
+```
+Tiling keeps working set small:
+  - Process 64×64 tiles
+  - 48 KB working set fits in L2
+  - 2048× reuse before eviction
+```
+
+Locality enables **cache efficiency**.
+
+### Separability
+
+The fundamental identity:
+
+```
+(A × B)[i,j] = Σ_k A[i,k] × B[k,j]
+            = A[i,:] · B[:,j]
+
+Output is the *inner product* of row i of A with column j of B.
+```
+
+The computation separates by output element—each can be computed independently.
+
+This enables **parallelism** (each thread computes different outputs).
+
+### Hardware Co-Design
+
+Tensor Cores are *built for* matrix multiply:
+
+```
+Input: Two 16×16 matrices
+Output: One 16×16 matrix
+Latency: A few cycles
+
+This isn't general-purpose hardware accelerating matmul.
+This is matmul-shaped hardware.
+```
+
+The algorithm (tiled GEMM) and the hardware (tensor cores, shared memory hierarchy) evolved together.
+
+## Key Takeaways
+
+1. **200× speedup is possible**: From naive loops to optimized BLAS/cuBLAS, the same algorithm runs 200× faster. All from exploiting memory hierarchy.
+
+2. **Memory access pattern dominates**: Loop reordering alone gives 4× speedup. The algorithm is the same; only the access pattern changes.
+
+3. **Tiling transforms memory-bound to compute-bound**: By keeping working sets in cache, we achieve the theoretical arithmetic intensity.
+
+4. **GPU shared memory is like CPU cache**: Tiling on GPU uses shared memory (fast SRAM) to enable data reuse across threads.
+
+5. **Hardware is specialized**: Tensor Cores exist because matrix multiply is *that* important. Modern ML is built on GEMM.
+
+6. **All four properties contribute**:
+   - Associativity → parallelism and tiling
+   - Locality → cache efficiency
+   - Separability → independent computation per output
+   - (Sparsity → structured sparse GEMM, Chapter 6)
+
+## The Meta-Lesson
+
+Matrix multiply is the *Drosophila* of performance engineering. It's simple enough to understand completely, yet rich enough to demonstrate every optimization technique.
+
+When you see a 200× speedup, you're seeing:
+- 4× from access patterns (loop order)
+- 10× from tiling (cache reuse)
+- 5× from vectorization (SIMD)
+- 10× from Tensor Cores (specialized hardware)
+
+These are multiplicative. Miss any one, and you leave 10× on the table.
+
+The best algorithms aren't just correct. They're *aligned* with hardware.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Implement and benchmark naive, reordered, and tiled matmul
+- Visualize cache behavior with different tile sizes
+- Compare CPU vs GPU performance
+- Profile memory bandwidth vs compute utilization
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/10-matrix-multiply.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Goto & Van De Geijn (2008). "Anatomy of High-Performance Matrix Multiplication"
+- Low et al. (2016). "Analytical Modeling Is Enough for High-Performance BLIS"
+- Jia et al. (2018). "Dissecting the NVIDIA Volta GPU Architecture via Microbenchmarking"
+- NVIDIA CUTLASS: https://github.com/NVIDIA/cutlass
 
 ---
 

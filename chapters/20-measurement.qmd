@@ -1,23 +1,637 @@
 ---
 title: "The Art of Measurement"
 subtitle: "How to Know What's Actually Happening"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+"If you can't measure it, you can't improve it." — Peter Drucker
+
+But what Drucker didn't say: if you measure the wrong thing, or measure it wrongly, you'll improve the wrong thing.
+
+Measurement is the foundation of performance engineering. Get it wrong, and nothing else matters.
 :::
 
-## Coming Soon
+## The Streetlight Effect
 
-This chapter will cover:
+A classic parable:
 
-- **Profiling tools** and what they actually measure
-- **Statistical validity** in noisy measurements
-- **Micro vs. macro** benchmarks
-- **Avoiding the streetlight effect**
-- The **Brendan Gregg methodologies**
+> A police officer finds a drunk looking for his keys under a streetlight.
+> "Where did you drop them?" the officer asks.
+> "Over in the park," the drunk replies.
+> "Then why are you looking here?"
+> "Because this is where the light is."
+
+Performance optimization has the same trap. We measure what's *easy* to measure, not what *matters*.
+
+```python
+# The streetlight measurement
+import time
+
+start = time.time()
+result = expensive_operation()
+elapsed = time.time() - start
+print(f"Operation took {elapsed:.3f}s")
+```
+
+This measures *wall clock time*. But is the operation slow because:
+- It's compute-bound? (CPU is the bottleneck)
+- It's memory-bound? (waiting for data)
+- It's I/O-bound? (waiting for disk/network)
+- Something else is running on the machine?
+
+Wall clock time doesn't tell you. You're looking where the light is.
+
+## What Profilers Actually Measure
+
+Different profilers measure different things. Understanding what each measures is critical.
+
+### Sampling Profilers
+
+**How they work**: Periodically interrupt the program, record where it is, build a histogram.
+
+```
+Time: |----x-------x-------x-------x-------x-------|
+              ↓       ↓       ↓       ↓       ↓
+           function A A      B       A       C
+
+Histogram: A: 60%, B: 20%, C: 20%
+```
+
+**What they measure**: Where the CPU *is*, not how long things *take*.
+
+**Artifacts**:
+- Statistical noise (small samples)
+- Can miss short functions (never sampled)
+- Measures wall time, not CPU time (includes waits)
+
+**Tools**: `perf` (Linux), Instruments (macOS), py-spy (Python)
+
+```bash
+# Linux perf
+perf record -g ./my_program
+perf report
+
+# Python py-spy
+py-spy top --pid 12345
+py-spy record -o profile.svg -- python script.py
+```
+
+### Instrumentation Profilers
+
+**How they work**: Insert timing code at function entry/exit.
+
+```python
+def profiled_function():
+    __profiler_enter("profiled_function")
+    # ... actual code ...
+    __profiler_exit("profiled_function")
+```
+
+**What they measure**: Exact time spent in each function (including overhead).
+
+**Artifacts**:
+- Overhead (each call adds microseconds)
+- Can change behavior (inlining prevented, caches polluted)
+- Very accurate for coarse-grained measurements
+
+**Tools**: cProfile (Python), gprof (C/C++)
+
+```python
+import cProfile
+
+cProfile.run('my_function()', sort='cumulative')
+```
+
+### Hardware Counters
+
+**How they work**: Read CPU's built-in performance monitoring unit (PMU).
+
+```bash
+perf stat ./my_program
+
+# Output:
+#  2,000,000,000 cycles
+#  1,000,000,000 instructions  (0.5 IPC)
+#    100,000,000 cache-misses
+#      1,000,000 branch-misses
+```
+
+**What they measure**: Actual hardware events—cycles, cache misses, branch mispredictions.
+
+**Why this matters**: These reveal the *cause* of slowness, not just the symptom.
+
+```
+Low IPC (instructions per cycle)?
+  → Memory-bound or stalled on something
+
+High cache miss rate?
+  → Data layout or access pattern problem
+
+High branch misprediction?
+  → Unpredictable control flow
+```
+
+**Tools**: `perf stat`, Intel VTune, AMD uProf
+
+### GPU Profilers
+
+GPU profiling is different. Key metrics:
+
+```
+Compute utilization:     Are the cores busy?
+Memory bandwidth:        Are we saturating HBM?
+Occupancy:               How many warps active vs possible?
+Kernel time breakdown:   Where does time go?
+```
+
+**Tools**: NVIDIA Nsight, PyTorch Profiler, nvprof
+
+```python
+# PyTorch profiler
+import torch.profiler
+
+with torch.profiler.profile(
+    activities=[
+        torch.profiler.ProfilerActivity.CPU,
+        torch.profiler.ProfilerActivity.CUDA,
+    ]
+) as prof:
+    model(input)
+
+print(prof.key_averages().table(sort_by="cuda_time_total"))
+```
+
+## Statistical Validity
+
+Performance measurements are noisy. You're measuring a random variable, not a constant.
+
+### Sources of Noise
+
+```
+System noise:
+  - Other processes
+  - Kernel scheduling
+  - Power management
+  - Thermal throttling
+
+Measurement noise:
+  - Timer resolution
+  - Profiler overhead
+  - JIT compilation warmup
+
+Data-dependent variation:
+  - Cache state
+  - Branch prediction history
+  - Input distribution
+```
+
+### How Many Runs?
+
+One measurement is not enough. But how many?
+
+```python
+import numpy as np
+from scipy import stats
+
+def benchmark(fn, n_runs=30):
+    times = []
+    for _ in range(n_runs):
+        start = time.perf_counter()
+        fn()
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    times = np.array(times)
+
+    return {
+        'mean': np.mean(times),
+        'std': np.std(times),
+        'median': np.median(times),
+        'min': np.min(times),
+        'max': np.max(times),
+        'ci_95': stats.t.interval(0.95, len(times)-1,
+                                   loc=np.mean(times),
+                                   scale=stats.sem(times))
+    }
+```
+
+**Rule of thumb**: 30 runs gives reasonable confidence intervals.
+
+### Which Statistic?
+
+Mean, median, or minimum?
+
+```
+Mean:    Sensitive to outliers. Use for throughput-focused analysis.
+Median:  Robust to outliers. Use for latency-focused analysis.
+Minimum: "Best case" (least noise). Controversial but useful.
+
+The minimum is often most reproducible:
+  - Noise almost always makes things slower, not faster
+  - Minimum approximates "performance without interference"
+  - But hides tail latency (important for user experience)
+```
+
+The right choice depends on what you're optimizing for.
+
+### Comparing Two Implementations
+
+Is A faster than B? This requires statistical testing.
+
+```python
+def is_faster(times_a, times_b, alpha=0.05):
+    """
+    Test if A is statistically significantly faster than B.
+    Returns True if we can reject the null hypothesis (A >= B).
+    """
+    # Mann-Whitney U test (doesn't assume normality)
+    stat, p_value = stats.mannwhitneyu(
+        times_a, times_b,
+        alternative='less'  # Test if A < B
+    )
+
+    return {
+        'a_mean': np.mean(times_a),
+        'b_mean': np.mean(times_b),
+        'speedup': np.mean(times_b) / np.mean(times_a),
+        'p_value': p_value,
+        'significant': p_value < alpha
+    }
+```
+
+**Avoid**: "A is 5% faster because the mean was 5% lower in one run."
+
+**Do**: "A is faster with p < 0.01; the 95% confidence interval for speedup is [1.03, 1.07]."
+
+## Micro vs. Macro Benchmarks
+
+### Microbenchmarks
+
+Measure one specific operation in isolation.
+
+```python
+# Microbenchmark: how fast is element access?
+import timeit
+
+setup = "import numpy as np; x = np.random.randn(10000)"
+stmt = "x[5000]"
+
+time_per_op = timeit.timeit(stmt, setup, number=1000000) / 1000000
+print(f"{time_per_op * 1e9:.2f} ns per access")
+```
+
+**Pros**:
+- Isolated: measures exactly what you intend
+- Fast: can run many iterations
+- Reproducible: minimal external factors
+
+**Cons**:
+- Unrealistic: no cache pollution from surrounding code
+- Optimized away: compiler may remove "useless" code
+- Miss the forest: 1% of total runtime optimized 10× is... 1% total improvement
+
+### Macrobenchmarks
+
+Measure the full application or realistic workload.
+
+```python
+# Macrobenchmark: end-to-end training time
+start = time.time()
+for epoch in range(10):
+    train_one_epoch(model, data)
+print(f"Total training time: {time.time() - start:.1f}s")
+```
+
+**Pros**:
+- Realistic: captures actual bottlenecks
+- Holistic: includes all interactions
+- Meaningful: directly measures what you care about
+
+**Cons**:
+- Slow: fewer iterations possible
+- Noisy: many sources of variation
+- Hard to attribute: where did the improvement come from?
+
+### The Right Level
+
+Use **microbenchmarks** to:
+- Test hypotheses ("is memory the bottleneck?")
+- Compare specific implementations
+- Understand component behavior
+
+Use **macrobenchmarks** to:
+- Validate that micro-improvements transfer to real workloads
+- Find the actual bottleneck
+- Make go/no-go decisions
+
+**The workflow**:
+1. Profile macro workload → find bottleneck
+2. Microbenchmark the bottleneck → understand it
+3. Optimize → validate with microbenchmark
+4. Verify improvement in macro workload
+
+## The Brendan Gregg Methodologies
+
+Brendan Gregg has codified several systematic approaches to performance analysis.
+
+### The USE Method
+
+For every resource (CPU, memory, disk, network):
+
+- **U**tilization: % of time the resource is busy
+- **S**aturation: Degree to which work is queued
+- **E**rrors: Count of error events
+
+```
+Resource      Utilization          Saturation          Errors
+─────────────────────────────────────────────────────────────
+CPU           % non-idle           run queue length    -
+Memory        % used               swap rate           OOM kills
+Disk          % busy               queue depth         device errors
+Network       % bandwidth used     dropped packets     errors
+GPU           SM utilization       queue depth         ECC errors
+```
+
+The beauty: systematic coverage. You won't miss a resource.
+
+```bash
+# Linux commands for USE metrics
+# CPU
+top                      # Utilization
+cat /proc/loadavg        # Saturation (run queue)
+
+# Memory
+free -m                  # Utilization
+vmstat 1                 # Saturation (si/so for swap)
+
+# Disk
+iostat -x 1              # Utilization (%util), Saturation (avgqu-sz)
+
+# Network
+sar -n DEV 1             # Utilization
+netstat -s               # Errors
+```
+
+### The RED Method
+
+For services (request-based systems):
+
+- **R**ate: Requests per second
+- **E**rrors: Failed requests per second
+- **D**uration: Latency of requests
+
+```python
+class ServiceMetrics:
+    def __init__(self):
+        self.request_count = 0
+        self.error_count = 0
+        self.latency_histogram = []
+
+    def record_request(self, latency, success):
+        self.request_count += 1
+        if not success:
+            self.error_count += 1
+        self.latency_histogram.append(latency)
+
+    def report(self, period_seconds):
+        return {
+            'rate': self.request_count / period_seconds,
+            'error_rate': self.error_count / period_seconds,
+            'p50_latency': np.percentile(self.latency_histogram, 50),
+            'p99_latency': np.percentile(self.latency_histogram, 99),
+        }
+```
+
+### Flame Graphs
+
+A visualization that shows where time is spent across the call stack.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                          main                                 │
+├──────────────────────────────────────────────────────────────┤
+│              train_epoch                │     eval           │
+├─────────────────────────────────────────┼────────────────────┤
+│    forward   │   backward   │  optim   │  forward  │ metrics│
+├──────────────┼──────────────┼──────────┼───────────┼────────┤
+│ attention│ffn│ attention│ffn│          │           │        │
+└──────────────┴──────────────┴──────────┴───────────┴────────┘
+
+Width = time spent in that function (including children)
+Stack = call path from root
+```
+
+How to read:
+- Width indicates time
+- Look for wide "plateaus" (where time is spent)
+- Narrow spikes are function call overhead
+
+```bash
+# Generate flame graph with perf
+perf record -g ./my_program
+perf script | stackcollapse-perf.pl | flamegraph.pl > profile.svg
+```
+
+## Common Measurement Mistakes
+
+### 1. Measuring Startup, Not Steady State
+
+```python
+# BAD: First run includes JIT compilation
+time_one_run(model)  # Includes torch compile, CUDA kernel loading
+
+# GOOD: Warm up, then measure
+for _ in range(5):  # Warmup
+    model(input)
+times = [time_one_run(model) for _ in range(100)]  # Measure
+```
+
+### 2. Forgetting CUDA Synchronization
+
+GPU operations are asynchronous. This measures nothing useful:
+
+```python
+# BAD: Measures kernel launch time, not execution time
+start = time.time()
+result = model(input)
+print(f"Time: {time.time() - start}")  # GPU still working!
+
+# GOOD: Wait for GPU
+torch.cuda.synchronize()
+start = time.time()
+result = model(input)
+torch.cuda.synchronize()
+print(f"Time: {time.time() - start}")
+```
+
+### 3. Dead Code Elimination
+
+Compilers remove code with no observable effect:
+
+```c
+// BAD: Compiler may eliminate this entirely
+for (int i = 0; i < N; i++) {
+    result = compute(data[i]);  // result never used after loop
+}
+
+// GOOD: Make result observable
+volatile int sink;
+for (int i = 0; i < N; i++) {
+    result = compute(data[i]);
+}
+sink = result;  // Compiler can't eliminate
+```
+
+```python
+# Python version with benchmark library
+import timeit
+
+# Use the result to prevent dead code elimination
+timeit.timeit(lambda: compute(data), number=1000)
+```
+
+### 4. Measuring the Measurement
+
+Profiling has overhead. Heavy instrumentation can change what you're measuring.
+
+```python
+# Heisenberg effect: observing changes behavior
+def profile_overhead_demo():
+    # Uninstrumented: 100ms
+    # With line-by-line profiler: 5000ms (50× overhead!)
+
+    # Solution: use sampling profilers for hot paths
+    # Reserve instrumentation for coarse-grained analysis
+    pass
+```
+
+### 5. Cache State Differences
+
+Cold cache vs. warm cache can differ 10×:
+
+```python
+# BAD: Inconsistent cache state
+times = []
+for i in range(100):
+    start = time.time()
+    process(data)  # First run: cold cache. Rest: warm cache.
+    times.append(time.time() - start)
+# times[0] >> times[1:99]
+
+# GOOD: Consistent cache state
+for _ in range(5):
+    process(data)  # Warmup
+
+times = []
+for i in range(100):
+    flush_cache()  # or accept warm cache consistently
+    start = time.time()
+    process(data)
+    times.append(time.time() - start)
+```
+
+## Building a Measurement Discipline
+
+### 1. Define What You're Measuring
+
+Before writing any code:
+- What metric matters? (Throughput? Latency? Memory?)
+- What workload is representative?
+- What's the baseline?
+
+### 2. Make Measurements Reproducible
+
+```python
+def set_reproducible_environment():
+    # Fix random seeds
+    np.random.seed(42)
+    torch.manual_seed(42)
+    torch.cuda.manual_seed_all(42)
+
+    # Disable nondeterminism
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    # Document system state
+    print(f"Python: {sys.version}")
+    print(f"PyTorch: {torch.__version__}")
+    print(f"CUDA: {torch.version.cuda}")
+    print(f"GPU: {torch.cuda.get_device_name()}")
+```
+
+### 3. Automate Benchmarking
+
+```python
+# benchmark.py
+import json
+from datetime import datetime
+
+def run_benchmark_suite():
+    results = {
+        'timestamp': datetime.now().isoformat(),
+        'commit': get_git_commit(),
+        'system': get_system_info(),
+        'benchmarks': {}
+    }
+
+    for name, fn in BENCHMARKS.items():
+        results['benchmarks'][name] = benchmark(fn)
+
+    with open(f'benchmarks/{datetime.now():%Y%m%d_%H%M%S}.json', 'w') as f:
+        json.dump(results, f, indent=2)
+
+    return results
+```
+
+### 4. Track Over Time
+
+Performance regression detection:
+
+```
+Commit A: forward pass = 45.2 ± 0.3 ms
+Commit B: forward pass = 47.8 ± 0.4 ms  ← 5.7% regression!
+Commit C: forward pass = 32.1 ± 0.2 ms  ← 28.9% improvement!
+```
+
+CI systems can run benchmarks on every commit and alert on regressions.
+
+## Key Takeaways
+
+1. **Know what you're measuring**: Different tools measure different things. Wall time ≠ CPU time ≠ GPU time.
+
+2. **Statistical validity matters**: One run is not a measurement. Use proper statistics to compare implementations.
+
+3. **Match the level to the question**: Microbenchmarks for hypotheses, macrobenchmarks for validation.
+
+4. **Use systematic methodologies**: USE for resources, RED for services. Don't miss anything.
+
+5. **Avoid common traps**: Warmup, synchronization, dead code elimination, cache state.
+
+The goal is not to measure *something*. It's to measure *the right thing*, correctly, and draw valid conclusions.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Compare profiling tools on the same workload
+- Calculate confidence intervals and statistical significance
+- Generate and interpret flame graphs
+- Practice the USE method on a sample system
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/20-measurement.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Gregg (2020). "Systems Performance: Enterprise and the Cloud" (2nd ed.)
+- Gregg. "The USE Method": https://www.brendangregg.com/usemethod.html
+- Mytkowicz et al. (2009). "Producing Wrong Data Without Doing Anything Obviously Wrong!"
+- Fleming & Wallace (1986). "How Not to Lie with Statistics: The Correct Way to Summarize Benchmark Results"
 
 ---
 

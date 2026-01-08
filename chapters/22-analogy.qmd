@@ -1,22 +1,584 @@
 ---
 title: "The Art of Analogy"
 subtitle: "Finding Related Problems That Have Been Solved"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+Pólya's most powerful heuristic: "Do you know a related problem?"
+
+The best performance engineers don't reinvent solutions. They recognize when a new problem is secretly an old problem in disguise.
+
+This chapter is about building that recognition.
 :::
 
-## Coming Soon
+## The Power of Related Problems
 
-This chapter will cover:
+When faced with a hard problem, the most useful question is often:
 
-- **Polya's key heuristic**: "Do you know a related problem?"
-- **Cross-domain transfer**: memory allocators → ID generation
-- **The pattern library**: recurring structures in performance
-- **When analogies fail** (and how to know)
+> "Where have I seen something like this before?"
+
+Consider:
+
+- FlashAttention is like streaming database aggregation
+- LoRA is like matrix factorization in recommender systems
+- Quantization is like JPEG compression
+- GPU memory management is like CPU cache management
+
+Each insight transfers decades of research from one domain to another.
+
+## How Analogies Work
+
+An analogy maps structure from a **source domain** (well-understood) to a **target domain** (new problem).
+
+```
+Source: Streaming aggregation (databases)
+Target: Attention (deep learning)
+
+Mapping:
+  sum(values)           →  softmax weighted sum
+  running total         →  running (max, sum, output)
+  one-pass constraint   →  memory efficiency
+  associativity         →  chunking
+
+Result: FlashAttention
+```
+
+The power comes from *structure preservation*. If two problems have the same structure, they have the same solution—translated.
+
+## Case Study: From Databases to FlashAttention
+
+Let's trace an actual analogy.
+
+### The Source Problem: Online Aggregation
+
+Databases have computed aggregates for decades:
+
+```sql
+SELECT AVG(value) FROM big_table
+```
+
+For a table that doesn't fit in memory, you need a streaming algorithm:
+
+```python
+def streaming_average(stream):
+    """Compute average without storing all values"""
+    total = 0
+    count = 0
+    for value in stream:
+        total += value
+        count += 1
+    return total / count
+```
+
+Key insight: We maintain *running state* and update it incrementally.
+
+### The Target Problem: Attention
+
+Standard attention:
+
+```python
+def attention(Q, K, V):
+    scores = Q @ K.T / sqrt(d)
+    weights = softmax(scores)  # Requires all scores at once
+    output = weights @ V
+    return output
+```
+
+Softmax seems to require all values simultaneously:
+
+```python
+def softmax(x):
+    exp_x = exp(x - max(x))  # Need max of all values
+    return exp_x / sum(exp_x)  # Need sum of all values
+```
+
+This is analogous to:
+
+```python
+def normalized_sum(values, weights):
+    weighted = [w * v for w, v in zip(weights, values)]
+    return sum(weighted) / sum(weights)
+```
+
+Both need to see all values to normalize. Or do they?
+
+### The Analogy
+
+Database insight: Many "need all values" operations have streaming equivalents via associativity.
+
+```python
+# Running average
+def streaming_avg(stream):
+    total = 0
+    count = 0
+    for value in stream:
+        total += value
+        count += 1
+    return total / count  # Normalize at the end
+```
+
+Can we do the same for softmax? The **max-stable trick**:
+
+```python
+def streaming_softmax_sum(stream):
+    """Compute sum(exp(x_i - max)) and max in one pass"""
+    running_max = float('-inf')
+    running_sum = 0
+
+    for value in stream:
+        if value > running_max:
+            # Rescale previous sum
+            running_sum = running_sum * exp(running_max - value)
+            running_max = value
+        running_sum += exp(value - running_max)
+
+    return running_max, running_sum
+```
+
+The weighted output uses the same trick:
+
+```python
+def streaming_weighted_sum(stream):
+    """Compute softmax-weighted sum in one pass"""
+    running_max = float('-inf')
+    running_sum = 0
+    running_output = 0
+
+    for score, value in stream:
+        if score > running_max:
+            scale = exp(running_max - score)
+            running_sum *= scale
+            running_output *= scale
+            running_max = score
+        weight = exp(score - running_max)
+        running_sum += weight
+        running_output += weight * value
+
+    return running_output / running_sum
+```
+
+This is the core of FlashAttention. The analogy:
+
+```
+Database streaming     →  Attention streaming
+─────────────────────────────────────────────
+running total          →  running (max, sum, output)
+update per item        →  update per K-V block
+normalize at end       →  divide by running sum
+```
+
+### The Transfer
+
+Once you recognize the analogy, the solution structure transfers:
+
+1. **Chunking** (from streaming): Process in blocks that fit in memory
+2. **Running state** (from aggregation): Maintain (max, sum, output) tuple
+3. **Rescaling** (from numerical stability): Use max-stable exponentials
+
+The database community solved this decades ago. FlashAttention rediscovered it.
+
+## The Pattern Library
+
+Over time, you build a library of patterns that keep recurring. Here are the most useful:
+
+### Pattern: Divide and Conquer
+
+**Source**: Mergesort, quicksort, binary search
+
+**Structure**: Split problem in half, solve recursively, combine results.
+
+**Transfers to**:
+- Cache-oblivious algorithms (recursive tiling)
+- Parallel reduction (split work among threads)
+- Hierarchical attention (split sequence, combine)
+
+```python
+# The universal pattern
+def divide_conquer(problem):
+    if is_base_case(problem):
+        return solve_directly(problem)
+    left, right = split(problem)
+    left_result = divide_conquer(left)
+    right_result = divide_conquer(right)
+    return combine(left_result, right_result)
+```
+
+### Pattern: Lazy Evaluation
+
+**Source**: Functional programming, demand paging
+
+**Structure**: Don't compute until needed. Cache results.
+
+**Transfers to**:
+- JIT compilation (compile only executed paths)
+- Lazy tensor materialization (don't allocate until used)
+- Copy-on-write (share until modification)
+
+```python
+# The universal pattern
+class Lazy:
+    def __init__(self, computation):
+        self.computation = computation
+        self.cached = None
+
+    def get(self):
+        if self.cached is None:
+            self.cached = self.computation()
+        return self.cached
+```
+
+### Pattern: Amortization
+
+**Source**: Dynamic arrays, splay trees
+
+**Structure**: Occasional expensive operations average out to cheap.
+
+**Transfers to**:
+- Gradient checkpointing (trade recompute for memory)
+- Memory pools (occasional allocation, fast reuse)
+- Batched operations (overhead per batch, not per item)
+
+```python
+# The universal pattern: occasional O(n), amortized O(1)
+class DynamicArray:
+    def append(self, item):
+        if len(self.data) == self.capacity:
+            self.resize(2 * self.capacity)  # Rare O(n)
+        self.data.append(item)  # Common O(1)
+```
+
+### Pattern: Memoization
+
+**Source**: Dynamic programming, caching
+
+**Structure**: Don't recompute what you've computed before.
+
+**Transfers to**:
+- KV cache in transformers (don't recompute past attention)
+- Compiled kernel caching (don't recompile same shapes)
+- Feature caching (store intermediate activations)
+
+```python
+# The universal pattern
+cache = {}
+def memoized(f):
+    def wrapper(*args):
+        if args not in cache:
+            cache[args] = f(*args)
+        return cache[args]
+    return wrapper
+```
+
+### Pattern: Trading Space for Time
+
+**Source**: Hash tables, lookup tables
+
+**Structure**: Precompute and store to avoid runtime computation.
+
+**Transfers to**:
+- Lookup tables for activation functions
+- Storing attention weights vs. recomputing
+- Materialized views vs. queries
+
+### Pattern: Trading Time for Space
+
+**Source**: Compression, streaming
+
+**Structure**: Recompute instead of storing.
+
+**Transfers to**:
+- Gradient checkpointing
+- Streaming algorithms
+- Recomputing activations instead of caching
+
+### Pattern: Approximation
+
+**Source**: Monte Carlo, compressed sensing
+
+**Structure**: Trade exactness for efficiency.
+
+**Transfers to**:
+- Stochastic gradient descent (approximate full gradient)
+- Quantization (approximate full precision)
+- Sparse attention (approximate full attention)
+
+## Cross-Domain Transfer
+
+The most powerful analogies come from outside your domain.
+
+### From Physics: Conservation Laws
+
+In physics, many systems satisfy conservation laws:
+
+```
+Energy in = Energy out + Energy stored
+```
+
+In computing, we have analogous constraints:
+
+```
+Data in = Data out + Data buffered
+Work = Compute × Time = Bandwidth × Data
+```
+
+This leads to insights like:
+
+- Little's Law: Throughput = Parallelism / Latency
+- Amdahl's Law: Speedup = 1 / (Serial + Parallel/P)
+- Bandwidth-bound: Time ≥ Data / Bandwidth
+
+### From Economics: Supply and Demand
+
+Economic thinking transfers surprisingly well:
+
+```
+Economics                    Computing
+─────────────────────────────────────────
+Scarce resource              Memory/compute
+Market equilibrium           Load balancing
+Arbitrage                    Optimization opportunity
+Diminishing returns          Amdahl's law
+Opportunity cost             Time vs. space tradeoff
+```
+
+When optimizing a system, ask:
+- What's the scarce resource?
+- Where's the "arbitrage opportunity" (unused capacity)?
+- What's the opportunity cost of this approach?
+
+### From Biology: Evolution
+
+Evolution has solved optimization problems for billions of years:
+
+```
+Mutation         →  Random search, perturbation
+Selection        →  Gradient descent, keeping improvements
+Adaptation       →  Auto-tuning, learning schedules
+Niches           →  Specialized hardware, accelerators
+```
+
+Many ML optimization techniques are literally inspired by evolution.
+
+### From Civil Engineering: Capacity Planning
+
+Traffic engineers study flow and congestion:
+
+```
+Traffic                      Computing
+─────────────────────────────────────────
+Road capacity                Bandwidth
+Vehicles                     Data/requests
+Congestion                   Queueing
+Rush hour                    Peak load
+Alternative routes           Load balancing
+Bottleneck (single lane)     Amdahl's serial portion
+```
+
+Queueing theory from traffic engineering is fundamental to systems performance.
+
+## When Analogies Fail
+
+Analogies are powerful but dangerous. They can mislead.
+
+### Failure Mode: Surface Similarity
+
+```
+"Attention is like a database query"
+  Similarity: Both find relevant items
+  Difference: Attention uses soft weighting, not filtering
+
+"Neural networks are like brains"
+  Similarity: Both compute
+  Difference: Almost everything else
+
+Danger: Optimizations that work for one may not work for the other
+```
+
+### Failure Mode: Wrong Abstraction Level
+
+```
+"GPU is like CPU but faster"
+  Similarity: Both execute instructions
+  Difference: Completely different architecture
+
+Danger: CPU optimizations (branch prediction, OoO execution)
+        don't transfer to GPU
+```
+
+### Failure Mode: Hidden Assumptions
+
+```
+"Sorting is like searching"
+  Similarity: Both involve comparing elements
+  Difference: Sorting has O(n log n) bound, searching O(log n)
+
+"Binary search works, so let's search for optimal X"
+  Assumption: X is monotonic (often false!)
+```
+
+### How to Know When Analogies Fail
+
+Test the mapping explicitly:
+
+```
+1. List the key properties of the source solution
+2. Map each property to the target domain
+3. Check if each mapped property holds
+4. If any fail, the analogy may break there
+```
+
+Example:
+
+```
+Source: Merge sort parallelization
+Property: Work can be divided evenly
+Target: Training neural networks
+
+Mapping: Can we divide training work evenly?
+Check: Yes, data parallel splits batches evenly ✓
+
+Mapping: Is combine step cheap?
+Check: Gradient averaging is cheap ✓
+
+Mapping: Are subproblems independent?
+Check: Mostly, except for batch normalization ✗
+
+Conclusion: Analogy mostly works, but breaks for batch norm
+```
+
+## Building Your Pattern Library
+
+### Step 1: Study Classic Algorithms
+
+The classics are classics for a reason:
+
+```
+Required reading:
+- CLRS (algorithms)
+- Hennessy & Patterson (computer architecture)
+- Silberschatz (operating systems)
+- Gray & Reuter (database systems)
+
+Each contains dozens of transferable patterns.
+```
+
+### Step 2: Understand the Why, Not Just the What
+
+```
+Learning mergesort:
+  What: Divide, sort halves, merge
+  Why:  Exploits divide-and-conquer for O(n log n)
+        Merge is O(n) because inputs are sorted
+
+The "why" transfers. The "what" is just one instantiation.
+```
+
+### Step 3: Practice Pattern Recognition
+
+When you see a solution:
+
+1. What pattern is it using?
+2. What are the key structural properties?
+3. Where else could this pattern apply?
+
+```
+FlashAttention: "That's streaming aggregation!"
+LoRA: "That's low-rank matrix factorization!"
+MoE: "That's adaptive compute allocation!"
+```
+
+### Step 4: Cross-Pollinate
+
+Read outside your field:
+
+- Databases → Memory management patterns
+- Compilers → Optimization passes
+- Graphics → GPU programming patterns
+- Networking → Distributed systems patterns
+- Biology → Optimization algorithms
+
+The best insights come from unexpected connections.
+
+## The Meta-Pattern
+
+All the patterns we've seen share a structure:
+
+```
+1. Identify the constraint (memory, compute, bandwidth, latency)
+2. Find a property that enables working around it
+   (associativity, separability, locality, approximability)
+3. Design an algorithm that exploits that property on hardware
+4. Implement with attention to hardware details
+```
+
+This is the meta-pattern of performance engineering:
+
+**Properties enable algorithms. Hardware constrains implementations. The art is connecting them.**
+
+## Key Takeaways
+
+1. **Related problems accelerate solutions**: Don't reinvent. Recognize and adapt.
+
+2. **Build a pattern library**: Divide-and-conquer, memoization, lazy evaluation, amortization—these recur everywhere.
+
+3. **Cross-domain analogies are powerful**: Databases, physics, economics, biology—all have transferable insights.
+
+4. **Test analogies carefully**: Surface similarity can mislead. Check that structural properties actually transfer.
+
+5. **Understand the "why"**: The mechanism transfers, not the implementation.
+
+The best performance engineers are collectors of patterns. Every new problem is an opportunity to recognize an old friend in new clothes.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Practice pattern recognition on sample problems
+- Build your own pattern library
+- Test analogies with explicit property mapping
+- Explore cross-domain transfers
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/22-analogy.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Pólya (1945). "How to Solve It" (especially Chapter 2: How to Solve It)
+- Hofstadter (2001). "Analogy as the Core of Cognition"
+- Gentner (1983). "Structure-Mapping: A Theoretical Framework for Analogy"
+- McConnell (2004). "Code Complete" (Chapter 2: Metaphors for a Richer Understanding)
+
+---
+
+## Conclusion: The Nature of Fast
+
+We've reached the end of our investigation.
+
+We started with a question: *Why are some programs fast and others slow?*
+
+The answer is not magic. It's not about knowing secret tricks. It's about understanding **properties**—mathematical properties that enable algorithmic optimization, and hardware properties that reward certain access patterns.
+
+**Associativity** enables chunking and parallelism.
+**Separability** enables factorization and low-rank approximation.
+**Sparsity** enables conditional computation.
+**Locality** enables cache efficiency.
+
+These properties don't exist in isolation. They compose. FlashAttention uses associativity *and* locality. LoRA uses separability *and* sparsity. The best algorithms use all of them.
+
+Hardware doesn't care about your algorithm's elegance. It cares about:
+- Memory access patterns
+- Arithmetic intensity
+- Parallelism without synchronization
+- Data that stays close to compute
+
+The art of performance engineering is matching algorithmic properties to hardware constraints. Find the properties your problem has. Exploit them on real hardware. Measure. Iterate.
+
+This is the nature of fast.
 
 ---
 
