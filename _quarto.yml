@@ -32,11 +32,14 @@ book:
         - chapters/11-flash-attention.qmd
         - chapters/12-lora.qmd
         - chapters/13-quantization.qmd
+        - chapters/14-distributed.qmd
+        - chapters/15-inference.qmd
     - part: "Part IV: The Method"
       chapters:
         - chapters/20-measurement.qmd
         - chapters/21-hypothesis.qmd
         - chapters/22-analogy.qmd
+        - chapters/23-when-not-to.qmd
     - part: "Appendices"
       chapters:
         - chapters/glossary.qmd

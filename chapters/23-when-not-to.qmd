@@ -1,0 +1,329 @@
+---
+title: "When Not to Optimize"
+subtitle: "The Art of Knowing When to Stop"
+id: sec-when-not-to
+---
+
+::: {.chapter-opener}
+"Premature optimization is the root of all evil." — Donald Knuth
+
+But what about *appropriate* optimization? *Necessary* optimization? *Finishing* optimization?
+
+Knowing when to optimize is only half the skill. Knowing when to stop—or when not to start—is the other half.
+:::
+
+## The Real Knuth Quote
+
+Everyone knows the fragment: "Premature optimization is the root of all evil."
+
+Here's the full context:
+
+> "We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil. **Yet we should not pass up our opportunities in that critical 3%.**"
+
+Knuth's actual advice has two parts:
+
+1. Don't optimize most things (the 97%)
+2. **Do** optimize the critical few (the 3%)
+
+The skill is distinguishing between them.
+
+## When Not to Start
+
+### Case 1: You Haven't Measured
+
+```python
+# Don't optimize this...
+def process_items(items):
+    return [expensive_transform(x) for x in items]
+
+# ...until you've confirmed it's actually slow
+```
+
+**Rule**: Never optimize without profiling first.
+
+Why? Because you're probably wrong about what's slow. The human brain is terrible at predicting performance bottlenecks.
+
+**Example**: You spend three days optimizing a database query that runs once per hour. The real bottleneck? A CSV parser that runs once per minute. But you never measured, so you never knew.
+
+### Case 2: It's Not on the Critical Path
+
+Your application takes 10 seconds total:
+- 9 seconds: Network I/O waiting for API responses
+- 1 second: Your code
+
+You can make your code 10× faster (100ms)... and the application still takes 9.1 seconds.
+
+**Rule**: Optimize the critical path, not the convenient path.
+
+**Amdahl's Law reminder** (from Chapter 3):
+
+$$\text{Speedup} = \frac{1}{(1 - p) + \frac{p}{s}}$$
+
+If your code is 10% of runtime (p = 0.1) and you make it 10× faster (s = 10):
+
+$$\text{Speedup} = \frac{1}{0.9 + 0.01} = 1.099$$
+
+Total speedup: 9.9%. Was three days of optimization worth that?
+
+### Case 3: It's Fast Enough
+
+Your API responds in 50ms. Your SLA requires < 100ms. There's no user-visible benefit to going faster.
+
+**Rule**: Define "fast enough" before optimizing.
+
+Ask:
+- What's the SLA or user expectation?
+- What's the cost of being slower?
+- What's the benefit of being faster?
+
+Sometimes the answer is: "There is no benefit. Ship it."
+
+### Case 4: Clarity Would Be Lost
+
+```python
+# Clear version
+def calculate_score(features):
+    relevance = dot_product(features, weights)
+    popularity = log(clicks + 1)
+    recency = exp(-age / decay_constant)
+    return relevance + 0.3 * popularity + 0.1 * recency
+
+# Fast but opaque version
+def calculate_score(f):
+    return f @ W + 0.3 * log1p(f[42]) + 0.1 * exp(-f[17] / C)
+```
+
+The fast version is 2× faster. It's also unmaintainable.
+
+**Rule**: Only sacrifice clarity when the performance gain justifies the maintenance cost.
+
+Maintenance costs compound. A confusing optimization that saves 10ms per request might cost you hours of debugging when requirements change.
+
+### Case 5: You're Prototyping
+
+Early in development, algorithms change daily. Data structures are in flux. Requirements shift.
+
+Optimizing during this phase is waste—you'll rewrite everything anyway.
+
+**Rule**: Prototype with clarity. Optimize when the design stabilizes.
+
+Exception: If performance is a feasibility question ("Can we even do this?"), then early prototyping with realistic performance is necessary.
+
+## When to Stop
+
+### Case 1: You've Hit the Theoretical Limit
+
+You've achieved 80% of the roofline model's predicted performance. The remaining 20% would require heroic, hardware-specific tuning.
+
+**Rule**: Stop at 70-80% of theoretical peak unless you have a compelling reason.
+
+The last 20% often costs 80% of the effort. Diminishing returns.
+
+### Case 2: You've Hit the Business Limit
+
+Your optimization reduced latency from 100ms to 50ms. Great! Further reducing to 25ms wouldn't change user behavior, revenue, or SLA compliance.
+
+**Rule**: Optimize to business requirements, not to perfection.
+
+Ask:
+- Does this improvement change user behavior?
+- Does it enable new use cases?
+- Does it reduce costs meaningfully?
+
+If "no" to all three, you're done.
+
+### Case 3: The Complexity Budget Is Exhausted
+
+You've added:
+- Custom memory allocators
+- Hand-tuned SIMD intrinsics
+- Architecture-specific kernel variants
+- Complex build-time code generation
+
+Your codebase is now fragile. Onboarding takes weeks. Debugging is painful.
+
+**Rule**: Every optimization has a complexity cost. Stop when that cost exceeds the benefit.
+
+**The maintenance equation**:
+
+```
+Total cost = Development cost + (Maintenance cost × Years)
+```
+
+A 10% speedup that triples debugging time might not pay off over a product's lifetime.
+
+### Case 4: You've Hit the Hardware Limit
+
+You're using 95% of memory bandwidth. You're using 90% of compute throughput. You've eliminated all obvious inefficiencies.
+
+The next step? Buy better hardware.
+
+**Rule**: When you've exhausted software optimizations, it's time to consider hardware.
+
+Sometimes the best optimization is:
+- "Use a GPU instead of a CPU"
+- "Add more RAM"
+- "Upgrade to a newer generation"
+
+Engineering time is expensive. Hardware is (comparatively) cheap.
+
+## The Cost-Benefit Framework
+
+Before optimizing, estimate:
+
+### Development Cost
+- Hours to implement
+- Hours to test
+- Hours to integrate
+- Risk of introducing bugs
+
+### Maintenance Cost (Annual)
+- Complexity added
+- Debugging difficulty
+- Onboarding friction
+- Portability reduced
+
+### Benefit
+- Latency improved (ms or %)
+- Throughput increased (requests/sec)
+- Cost saved ($ per month)
+- User experience improved (qualitative)
+
+**Decision rule**:
+
+```
+If (benefit / (dev_cost + 5 * maintenance_cost)) > threshold:
+    Optimize
+Else:
+    Don't
+```
+
+The "5" is a multiplier for 5 years. Adjust based on your product lifecycle.
+
+## Common Mistakes
+
+### Mistake 1: Optimizing Too Early
+
+You optimize a function that gets called once during initialization. You spent hours. It saves 10ms total.
+
+### Mistake 2: Optimizing Too Late
+
+You shipped code with O(n²) complexity in the critical path. Now it's in production with customers depending on it. Fixing it requires backward compatibility hacks.
+
+**Lesson**: Get big-O right early. Optimize constants later.
+
+### Mistake 3: Micro-Optimizing While Macro-Broken
+
+You're saving nanoseconds in tight loops while your architecture copies entire datasets unnecessarily.
+
+### Mistake 4: Optimizing What You Can, Not What Matters
+
+Library code is easy to optimize (you control it). External API calls are hard (you don't). So you optimize library code... even though API latency dominates.
+
+**Lesson**: Optimize based on impact, not convenience.
+
+### Mistake 5: Assuming Library Code Is Optimal
+
+"PyTorch is written by experts. It must be optimal."
+
+Sometimes true. Sometimes false. Frameworks optimize for generality, not your specific use case.
+
+**Rule**: Trust, but verify. Profile library code too.
+
+## When to Use Library Implementations
+
+You've learned FlashAttention, LoRA, and quantization. Should you implement them yourself?
+
+**Almost never.**
+
+Use libraries when:
+- ✅ The operation is complex (FlashAttention, FFT, matrix multiply)
+- ✅ Hardware-specific tuning matters (CUDA kernels, SIMD)
+- ✅ The library is well-maintained (PyTorch, NumPy, cuBLAS)
+- ✅ The library is correct (tested at scale)
+
+Implement yourself when:
+- ❌ The library doesn't support your use case
+- ❌ The library has unacceptable overhead for your needs
+- ❌ You're learning (but don't ship custom implementations)
+- ❌ You've profiled and confirmed the library is the bottleneck
+
+**Example**: Don't write your own matrix multiply. Use BLAS. It's faster than anything you'll write in a reasonable time frame.
+
+**Exception**: If you're doing research on novel matrix multiplication algorithms, then yes, implement your own. But that's not optimization—that's research.
+
+## The Optimization Checklist
+
+Before optimizing, answer these questions:
+
+1. **Have I profiled?** Do I know where time is actually spent?
+
+2. **Is this the bottleneck?** Will optimizing this make the overall system faster?
+
+3. **What's the theoretical limit?** How much room for improvement exists?
+
+4. **What's fast enough?** What's the target, and why?
+
+5. **What's the cost?** Development time + maintenance burden?
+
+6. **What's the benefit?** Latency reduction? Cost savings? User experience?
+
+7. **Are there libraries?** Can I use existing, optimized implementations?
+
+8. **Can I buy faster hardware instead?** Is that cheaper than engineering time?
+
+If you can't answer these confidently, don't optimize yet. Measure more.
+
+## The Right Time to Optimize
+
+Optimization should happen when:
+
+1. **You've measured**: Profiling shows a clear bottleneck
+2. **It's on the critical path**: Fixing it improves the overall system
+3. **It's worth the cost**: Benefit exceeds development + maintenance burden
+4. **You know the target**: You have a concrete "fast enough" definition
+5. **The design is stable**: You're not rewriting everything next week
+
+If all five are true, optimize away.
+
+If any are false, reconsider.
+
+## Connections
+
+**Chapter 20 (Measurement)**: You need profiling to know *what* to optimize.
+
+**Chapter 21 (Hypothesis)**: You need hypothesis-driven debugging to know *why* it's slow.
+
+**Chapter 22 (Analogy)**: You need pattern recognition to know *how* to fix it.
+
+This chapter adds: knowing *when* to fix it—and when not to.
+
+## Key Takeaways
+
+1. **Measure first**: Never optimize without profiling.
+
+2. **Optimize the critical 3%**: Most code doesn't matter. Find the part that does.
+
+3. **Define "fast enough"**: Without a target, you'll never stop.
+
+4. **Count the costs**: Complexity and maintenance compound over time.
+
+5. **Know when to stop**: Perfect is the enemy of good.
+
+6. **Use libraries**: Unless you have a very good reason, use existing optimized code.
+
+7. **Consider hardware**: Sometimes buying better hardware is cheaper than engineering time.
+
+---
+
+::: {.callout-tip}
+## The 10x Rule
+
+A useful heuristic: Only optimize if you expect at least a 10× improvement in that component, *or* if the component is >10% of total runtime.
+
+Smaller gains are rarely worth the complexity cost.
+:::
+
+---
+
+[**← Previous: The Art of Analogy**](22-analogy.qmd) | [**Glossary →**](glossary.qmd)
