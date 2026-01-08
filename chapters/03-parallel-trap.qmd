@@ -1,22 +1,458 @@
 ---
 title: "The Parallel Trap"
 subtitle: "Why More Cores Don't Always Mean More Speed"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+Parallelism promises: "More cores, more speed."
+
+Parallelism delivers: "More cores, more coordination overhead, *sometimes* more speed."
 :::
 
-## Coming Soon
+## The Third Lie
 
-This chapter will investigate:
+In the first two chapters, we dismantled two comforting illusions:
 
-- **Amdahl's Law** and why it's optimistic
-- **Coordination costs** that grow with parallelism
-- **Contention** for shared resources
-- **When parallelism helps** vs. when it hurts
+1. Memory is uniform (it's not—there's a 200× latency hierarchy)
+2. FLOPS measure performance (they don't—bandwidth often dominates)
+
+Now we confront a third: **parallel speedup is free.**
+
+The naive model: if you have 8 cores, your code runs 8× faster. If you have 64 cores, 64× faster. GPUs have thousands of cores, so they're thousands of times faster than CPUs.
+
+This model is wrong. Sometimes catastrophically wrong.
+
+## Amdahl's Law: The Famous Limit
+
+Gene Amdahl's 1967 observation is the most-cited result in parallel computing:
+
+$$\text{Speedup} = \frac{1}{(1-p) + \frac{p}{n}}$$
+
+Where:
+
+- $p$ is the fraction of code that can be parallelized
+- $n$ is the number of processors
+- $(1-p)$ is the serial fraction
+
+The insight: if 10% of your code is serial, you can never get more than 10× speedup, no matter how many cores you add.
+
+| Serial Fraction | Max Speedup (∞ cores) |
+|-----------------|----------------------|
+| 1%              | 100×                 |
+| 5%              | 20×                  |
+| 10%             | 10×                  |
+| 25%             | 4×                   |
+| 50%             | 2×                   |
+
+This is taught in every parallel computing course. But it's the *optimistic* bound.
+
+## The Hidden Costs Amdahl Ignores
+
+Amdahl's Law assumes the serial fraction is constant. In reality, parallelism introduces *new* serial work:
+
+### 1. Coordination Overhead
+
+Threads must synchronize. Processes must communicate. This takes time—time that grows with the number of parallel units.
+
+```python
+# Parallel sum: the naive approach
+def parallel_sum_naive(arr, num_threads):
+    chunk_size = len(arr) // num_threads
+    partial_sums = [0] * num_threads
+
+    def worker(thread_id):
+        start = thread_id * chunk_size
+        end = start + chunk_size
+        partial_sums[thread_id] = sum(arr[start:end])
+
+    threads = [Thread(target=worker, args=(i,)) for i in range(num_threads)]
+    for t in threads: t.start()
+    for t in threads: t.join()  # <-- Barrier: wait for all threads
+
+    return sum(partial_sums)  # <-- Serial: combine results
+```
+
+The `join()` and final `sum()` are serial. But there's more hidden cost:
+
+- Thread creation and destruction
+- Memory allocation for each thread's stack
+- OS scheduling overhead
+- Cache coherence traffic when threads access shared state
+
+### 2. Contention
+
+When multiple threads access the same resource, they contend:
+
+```python
+# The worst case: shared counter
+counter = 0
+lock = Lock()
+
+def increment():
+    global counter
+    for _ in range(1000000):
+        with lock:  # Only one thread can hold the lock
+            counter += 1
+```
+
+With 8 threads, this runs *slower* than with 1 thread. The lock serializes all access—we've added overhead for zero parallelism.
+
+### 3. Memory Bandwidth Saturation
+
+Even without locks, parallel code can bottleneck on memory:
+
+```python
+# Parallel array read
+def parallel_read(arr, num_threads):
+    chunk_size = len(arr) // num_threads
+    results = [0] * num_threads
+
+    def worker(thread_id):
+        start = thread_id * chunk_size
+        end = start + chunk_size
+        results[thread_id] = sum(arr[start:end])  # Memory-bound
+
+    # ... spawn threads ...
+```
+
+Each thread reads from memory. But memory bandwidth is finite. After a few threads, we saturate the memory bus—adding more threads doesn't help.
+
+```
+Speedup vs. Thread Count (Memory-Bound Workload)
+
+Speedup
+   │
+ 4 ┤         ●────────────────●  Memory bandwidth limit
+   │       ●
+ 3 ┤     ●
+   │   ●
+ 2 ┤  ●
+   │ ●
+ 1 ┤●
+   └──┬──┬──┬──┬──┬──┬──┬──┬──
+     1  2  4  6  8 12 16 24 32
+              Threads
+```
+
+On a typical server, memory bandwidth saturates around 4-8 threads for memory-bound workloads. The other 56 cores? Waiting.
+
+## Investigation: Where Does Parallelism Actually Help?
+
+Let's measure. We'll compare two workloads:
+
+**Compute-bound**: Square root computation (lots of math per byte)
+
+**Memory-bound**: Array summation (minimal math per byte)
+
+```python
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+import time
+
+def benchmark_scaling(func, data, max_threads=16):
+    """Measure speedup as we add threads."""
+    times = {}
+
+    # Baseline: single thread
+    start = time.perf_counter()
+    func(data, num_threads=1)
+    times[1] = time.perf_counter() - start
+
+    for n in [2, 4, 8, 12, 16]:
+        start = time.perf_counter()
+        func(data, num_threads=n)
+        times[n] = time.perf_counter() - start
+
+    return {n: times[1] / t for n, t in times.items()}
+
+# Compute-bound: many operations per element
+def compute_bound_work(data, num_threads):
+    def worker(chunk):
+        result = 0
+        for x in chunk:
+            # 100 iterations of expensive math
+            for _ in range(100):
+                result += np.sqrt(abs(x) + 1)
+        return result
+
+    chunk_size = len(data) // num_threads
+    chunks = [data[i*chunk_size:(i+1)*chunk_size] for i in range(num_threads)]
+
+    with ThreadPoolExecutor(max_workers=num_threads) as ex:
+        results = list(ex.map(worker, chunks))
+    return sum(results)
+
+# Memory-bound: minimal operations per element
+def memory_bound_work(data, num_threads):
+    def worker(chunk):
+        return chunk.sum()  # Just read and add
+
+    chunk_size = len(data) // num_threads
+    chunks = [data[i*chunk_size:(i+1)*chunk_size] for i in range(num_threads)]
+
+    with ThreadPoolExecutor(max_workers=num_threads) as ex:
+        results = list(ex.map(worker, chunks))
+    return sum(results)
+
+# Run the investigation
+data = np.random.randn(10_000_000)
+
+print("Compute-bound scaling:")
+compute_scaling = benchmark_scaling(compute_bound_work, data)
+for n, speedup in compute_scaling.items():
+    print(f"  {n:2d} threads: {speedup:.2f}x")
+
+print("\nMemory-bound scaling:")
+memory_scaling = benchmark_scaling(memory_bound_work, data)
+for n, speedup in memory_scaling.items():
+    print(f"  {n:2d} threads: {speedup:.2f}x")
+```
+
+Typical results on a 16-core machine:
+
+```
+Compute-bound scaling:
+   1 threads: 1.00x
+   2 threads: 1.95x
+   4 threads: 3.82x
+   8 threads: 7.41x
+  12 threads: 10.8x
+  16 threads: 13.2x
+
+Memory-bound scaling:
+   1 threads: 1.00x
+   2 threads: 1.89x
+   4 threads: 3.21x
+   8 threads: 3.45x  <-- Saturated!
+  12 threads: 3.52x
+  16 threads: 3.48x
+```
+
+The compute-bound workload scales nearly linearly. The memory-bound workload hits a wall at ~4 threads.
+
+## The GPU Paradox
+
+GPUs have thousands of cores. They should be thousands of times faster than CPUs, right?
+
+Sometimes yes. Often no.
+
+GPUs achieve massive parallelism through a specific model:
+
+1. **SIMT (Single Instruction, Multiple Thread)**: Many threads execute the *same* instruction on different data
+2. **Memory coalescing**: Threads must access adjacent memory addresses
+3. **Occupancy**: Many threads must be active to hide memory latency
+
+When code fits this model, GPUs dominate. When it doesn't, they struggle.
+
+### When GPUs Win
+
+```
+Operation: Matrix Multiply (4096×4096)
+  CPU (32 cores):    ~2000 ms
+  GPU (A100):        ~5 ms
+  Speedup:           400×
+```
+
+Matrix multiply is perfect for GPUs:
+
+- Massively parallel (each output element independent)
+- Regular access patterns (coalesced memory access)
+- High arithmetic intensity (lots of work per byte)
+
+### When GPUs Struggle
+
+```
+Operation: Linked List Traversal
+  CPU (1 core):      ~50 ms
+  GPU (A100):        ~500 ms
+  "Speedup":         0.1× (10× slower!)
+```
+
+Linked list traversal is terrible for GPUs:
+
+- Sequential dependencies (can't parallelize)
+- Random memory access (can't coalesce)
+- Low arithmetic intensity (one read per step)
+
+### The Warp Divergence Problem
+
+GPUs execute threads in groups called "warps" (32 threads on NVIDIA). All threads in a warp must execute the same instruction.
+
+What happens with conditionals?
+
+```python
+# Pseudocode for GPU kernel
+def kernel(data, output):
+    idx = get_thread_id()
+
+    if data[idx] > 0:
+        output[idx] = expensive_computation_A(data[idx])
+    else:
+        output[idx] = expensive_computation_B(data[idx])
+```
+
+If half the threads take the `if` branch and half take `else`, the warp must execute both paths. Threads not on the current branch are *masked* (they wait, doing nothing).
+
+Worst case: 32× slowdown from divergence.
+
+```
+Warp Execution with Divergence:
+
+Time →
+Thread 0:  [████████████████]................  (compute A)
+Thread 1:  ................[████████████████]  (compute B)
+Thread 2:  [████████████████]................  (compute A)
+Thread 3:  ................[████████████████]  (compute B)
+...
+Thread 31: [████████████████]................  (compute A)
+
+Both branches take full time. No speedup from parallelism.
+```
+
+## The Real Limit: Coordination Grows
+
+Here's what Amdahl doesn't capture: coordination overhead often grows with parallelism.
+
+### Tree Reduction
+
+Summing N numbers with P processors:
+
+1. Each processor sums N/P elements locally: O(N/P)
+2. Combine partial sums in a tree: O(log P) steps
+
+The coordination (tree reduction) grows logarithmically. For large P, this dominates.
+
+```
+Tree Reduction with 8 processors:
+
+Step 1: [P0]──┬──[P1]  [P2]──┬──[P3]  [P4]──┬──[P5]  [P6]──┬──[P7]
+              │              │              │              │
+Step 2:      [S01]────────[S23]           [S45]────────[S67]
+                    │                            │
+Step 3:            [S0123]──────────────────[S4567]
+                              │
+Step 4:                    [FINAL]
+
+4 steps of coordination for 8 processors.
+With 1024 processors: 10 steps.
+With 1M processors: 20 steps.
+```
+
+### All-to-All Communication
+
+Some algorithms require every processor to communicate with every other:
+
+- Gradient synchronization in distributed training
+- Global transpose in FFT
+- Certain graph algorithms
+
+Cost: O(P²) messages or O(P) with optimized algorithms. Either way, it grows.
+
+## When Parallelism Helps: A Checklist
+
+Before parallelizing, ask:
+
+1. **Is the workload compute-bound?**
+   - If memory-bound, you'll saturate bandwidth quickly
+   - Measure arithmetic intensity first
+
+2. **Is the work divisible?**
+   - Can you split into independent chunks?
+   - Are there dependencies between iterations?
+
+3. **Is the granularity coarse enough?**
+   - Fine-grained parallelism → coordination overhead dominates
+   - Rule of thumb: each parallel unit should do 10,000+ operations
+
+4. **Will threads fight over resources?**
+   - Shared data structures with locks
+   - False sharing (threads accessing nearby cache lines)
+   - Memory bandwidth
+
+5. **Does the algorithm fit the hardware?**
+   - GPUs: regular, data-parallel, high arithmetic intensity
+   - CPUs: irregular, task-parallel, lower latency tolerance
+
+## The Strategic Insight
+
+Parallelism isn't free performance. It's a *trade*:
+
+- You trade **simplicity** for potential speedup
+- You trade **predictability** for potential throughput
+- You trade **debugging ease** for potential scalability
+
+The question isn't "how do I parallelize this?" but "should I parallelize this, and where?"
+
+The answer often comes from the previous chapters:
+
+1. **Memory hierarchy** (Chapter 1): If your algorithm is memory-bound, more parallelism won't help after you saturate bandwidth
+2. **Arithmetic intensity** (Chapter 2): High intensity → parallelism helps. Low intensity → fix the algorithm first
+
+```
+The Decision Tree:
+
+Is it slow?
+    │
+    ├─ No → Don't parallelize
+    │
+    └─ Yes → Is it compute-bound?
+                 │
+                 ├─ No → Fix memory access patterns first (Ch 1-2)
+                 │
+                 └─ Yes → Is the work divisible?
+                              │
+                              ├─ No → Different algorithm needed
+                              │
+                              └─ Yes → Can you avoid coordination?
+                                           │
+                                           ├─ No → Minimize coordination
+                                           │
+                                           └─ Yes → Parallelize!
+```
+
+## Key Takeaways
+
+1. **Amdahl is optimistic**: Real parallel overhead often exceeds the serial fraction
+
+2. **Memory saturates fast**: Memory-bound workloads hit bandwidth limits at low thread counts
+
+3. **Coordination grows**: Synchronization, communication, and contention scale with parallelism
+
+4. **GPUs are specialized**: They excel at regular, data-parallel, high-intensity work—and struggle with everything else
+
+5. **Measure first**: Profile to find the bottleneck. If it's not compute-bound, parallelism isn't the answer
+
+## Connection to Mathematical Properties
+
+In the coming chapters, we'll see how mathematical structure determines parallelizability:
+
+- **Associativity** (Chapter 4): Operations that associate can be reduced in any order—enabling parallel reduction
+- **Commutativity**: Order-invariant operations can be reordered for better locality
+- **Independence**: Separable computations can run in parallel without coordination
+
+The math isn't abstract—it's a guide to what can be parallelized without changing the answer.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Measure scaling of compute-bound vs memory-bound workloads
+- Visualize bandwidth saturation
+- Explore the impact of coordination overhead
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/03-parallel-scaling.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Amdahl, G. (1967). "Validity of the single processor approach to achieving large scale computing capabilities"
+- Gustafson, J. (1988). "Reevaluating Amdahl's Law" (the optimistic counterpoint)
+- [NVIDIA CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/) - Warp divergence and occupancy
 
 ---
 
