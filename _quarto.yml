@@ -18,6 +18,7 @@ book:
         - chapters/01-memory-hierarchy.qmd
         - chapters/02-bandwidth.qmd
         - chapters/03-parallelism.qmd
+        - chapters/04-gpu-architecture.qmd
         - chapters/interlude-measurement.qmd
     - part: "Part II: The Algebra of Efficiency"
       chapters:
@@ -41,6 +42,8 @@ book:
         - chapters/17-analogy.qmd
         - chapters/18-when-not-to.qmd
         - chapters/19-profiling-tools.qmd
+        - chapters/20-compiler-opts.qmd
+        - chapters/21-triton.qmd
     - part: "Appendices"
       chapters:
         - chapters/glossary.qmd
