@@ -35,6 +35,7 @@ book:
         - chapters/12-quantization.qmd
         - chapters/13-distributed.qmd
         - chapters/14-inference.qmd
+        - chapters/24-mixture-of-experts.qmd
     - part: "Part IV: The Method"
       chapters:
         - chapters/15-measurement.qmd
