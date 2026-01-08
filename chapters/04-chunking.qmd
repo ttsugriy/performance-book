@@ -195,92 +195,36 @@ print(f"Combined:  max={m_combined}, sum={s_combined:.6f}")
 
 **The softmax denominator is associative.** Not obviously, but once you find the right state, it combines.
 
-## From Softmax to FlashAttention
+## Preview: From Softmax to FlashAttention
 
-This is exactly how FlashAttention works.
+This streaming softmax is the mathematical foundation of FlashAttention.
 
-Standard attention:
-
-```
-Q, K, V = query, key, value matrices
-S = Q @ K.T           # Attention scores (O(n²) memory!)
-P = softmax(S)        # Row-wise softmax
-O = P @ V             # Output
-```
-
-The problem: `S` is n × n. For sequence length 32K, that's 4 GB per head, per layer, per batch element.
-
-FlashAttention's insight: extend the streaming softmax to track output state too.
-
-The state becomes `(max, sum, output)`:
-
-```python
-def flash_attention_block(Q_block, K, V, state=None):
-    """Process one block of queries against all keys/values."""
-    if state is None:
-        m = float('-inf')
-        s = 0.0
-        o = np.zeros_like(Q_block @ V[:1].T)
-    else:
-        m, s, o = state
-
-    # Compute attention scores for this block
-    scores = Q_block @ K.T
-
-    for i, row_scores in enumerate(scores):
-        row_max = row_scores.max()
-
-        if row_max > m[i]:
-            # Max changed: rescale output and sum
-            scale = np.exp(m[i] - row_max)
-            o[i] = o[i] * scale
-            s[i] = s[i] * scale
-            m[i] = row_max
-
-        # Add contribution from this block
-        exp_scores = np.exp(row_scores - m[i])
-        s[i] += exp_scores.sum()
-        o[i] += exp_scores @ V
-
-    return (m, s, o)
-
-def flash_attention(Q, K, V, block_size=64):
-    """Compute attention without materializing the full attention matrix."""
-    n = Q.shape[0]
-    state = None
-
-    # Process K, V in blocks
-    for j in range(0, n, block_size):
-        K_block = K[j:j+block_size]
-        V_block = V[j:j+block_size]
-        state = flash_attention_block(Q, K_block, V_block, state)
-
-    m, s, o = state
-    return o / s[:, None]  # Normalize by softmax denominator
-```
+The key insight: we can extend the (max, sum) state to include the output accumulator. Standard attention needs O(n²) memory to store the attention matrix; FlashAttention uses the streaming approach to reduce this to O(n).
 
 ```
-Memory usage:
-
-Standard attention:
-  Q, K, V:      O(n × d)
+Standard attention memory:
   S = Q @ K.T:  O(n²)  ← The killer
   P (softmax):  O(n²)  ← Also killer
-  Total:        O(n²)
 
-FlashAttention:
-  Q, K, V:      O(n × d)
-  State (m,s,o): O(n × d)
-  Per-block:    O(block_size × d)
-  Total:        O(n × d)
+FlashAttention memory:
+  State (max, sum, output): O(n × d)
+  Per-block intermediates:  O(block_size × d)
+  Total:                    O(n × d)
 
-Reduction: O(n²) → O(n)
+For n = 32,768, d = 128:
+  Standard: 4 GB per attention layer
+  Flash:    16 MB per attention layer
+  Reduction: 256×
 ```
 
-For n = 32,768 and d = 128:
-- Standard: 4 GB per attention layer
-- Flash: 16 MB per attention layer
-- **Reduction: 256×**
+Chapter 11 derives FlashAttention in full detail, including:
+
+- The complete tiled algorithm
+- Why failed approaches (sparse attention, gradient checkpointing) don't solve this problem
+- The backward pass with recomputation
+- Hardware-specific tuning
+
+The core insight—streaming softmax via (max, sum) state—is what we've developed here.
 
 ## The General Pattern
 
@@ -412,17 +356,6 @@ Associativity        →    Limited SRAM         →  Tiled/blocked algorithms
 4. **The pattern is learnable**: Ask "what state would let me combine partial results?" This question guides discovery
 
 5. **Hardware rewards associativity**: The property aligns with every level of the memory hierarchy and parallel execution
-
-## Connection to FlashAttention Investigation
-
-Chapter 11 walks through the full FlashAttention derivation in detail, including:
-
-- The tiling strategy (how to choose block sizes)
-- The backward pass (gradients also use streaming)
-- Hardware-specific tuning
-- Benchmarks and profiling
-
-The core insight—streaming softmax via (max, sum) state—is what we've developed here.
 
 ---
 
