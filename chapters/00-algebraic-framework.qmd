@@ -1,0 +1,469 @@
+---
+title: "The Algebraic Framework"
+subtitle: "A Unified Theory of Performance Optimization"
+id: sec-algebraic-framework
+---
+
+---
+
+::: {.chapter-opener}
+Every performance optimization exploits a mathematical property. Understanding these properties transforms optimization from art to science.
+
+This chapter establishes the framework that unifies the entire book.
+:::
+
+## The Central Claim
+
+This book makes a bold claim:
+
+> **Every significant performance optimization can be traced to a mathematical property of the computation.**
+
+Not "some optimizations." Not "many optimizations." *Every* significant one.
+
+This isn't mysticism—it's recognition that algorithms operate on mathematical structures, and those structures have properties that either enable or preclude certain transformations.
+
+## The Optimization Equation
+
+Performance optimization solves a fundamental equation:
+
+$$\text{Same Result} + \text{Fewer Resources} = \text{Optimization}$$
+
+The challenge: How do we know a transformation preserves the result?
+
+**Answer: Mathematical properties guarantee it.**
+
+When we know a computation has a particular property, we know certain transformations are *legal*—they preserve correctness by mathematical necessity, not by accident.
+
+## The Six Fundamental Properties
+
+Through extensive study of performance optimizations across domains, six properties emerge as fundamental:
+
+```
+THE PERIODIC TABLE OF OPTIMIZATION
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  ASSOCIATIVITY          SEPARABILITY           LOCALITY                    │
+│  (a ⊕ b) ⊕ c = a ⊕ (b ⊕ c)   A = UV^T             f(x) depends only       │
+│                                                    on nearby x             │
+│  Enables:               Enables:                Enables:                   │
+│  • Chunking             • Factorization         • Tiling                   │
+│  • Streaming            • Low-rank approx       • Blocking                 │
+│  • Parallelization      • Decomposition         • Caching                  │
+│  • Reduction trees      • Separation of vars    • Reordering               │
+│                                                                             │
+│  Examples:              Examples:               Examples:                  │
+│  • FlashAttention       • LoRA                  • Blocked matmul           │
+│  • Parallel prefix      • Depthwise conv        • Tiled convolution        │
+│  • Online softmax       • SVD compression       • Cache-oblivious algs     │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  SPARSITY               REDUNDANCY              SYMMETRY                   │
+│  Most elements are      Information content     f(x) = f(g(x)) for        │
+│  zero or negligible     < representation size   some transformation g     │
+│                                                                             │
+│  Enables:               Enables:                Enables:                   │
+│  • Skipping zeros       • Quantization          • Weight sharing           │
+│  • Conditional compute  • Compression           • Equivariant networks     │
+│  • Attention sparsity   • Caching               • Convolution              │
+│  • Expert selection     • Approximation         • Symmetry reduction       │
+│                                                                             │
+│  Examples:              Examples:               Examples:                  │
+│  • MoE routing          • INT8/INT4 quant       • CNN weight sharing       │
+│  • Top-k attention      • KV cache              • Group equivariance       │
+│  • Pruning              • Prefix caching        • Fourier methods          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Property 1: Associativity
+
+**Definition:** An operation $\oplus$ is associative if $(a \oplus b) \oplus c = a \oplus (b \oplus c)$.
+
+**Why it matters:** Associativity means we can *regroup* without changing the result. This unlocks:
+
+- **Chunking:** Process in pieces, combine results
+- **Streaming:** Process incrementally, never holding everything in memory
+- **Parallelization:** Different processors handle different groups, merge at end
+- **Pipelining:** Start on next chunk before finishing current
+
+**The FlashAttention insight:**
+
+Standard softmax appears non-associative:
+$$\text{softmax}(x)_i = \frac{e^{x_i}}{\sum_j e^{x_j}}$$
+
+The denominator requires knowing *all* values. How can we chunk?
+
+The insight: Softmax *is* associative with the right state representation:
+$$\text{state} = (\max, \sum e^{x-\max}, \sum e^{x-\max} \cdot v)$$
+
+This (max, sum, weighted_sum) triple forms a **monoid**—it has associative combination. That's why FlashAttention works.
+
+**Recognizing associativity:**
+
+Ask: "If I split this computation in half, can I combine the halves?"
+
+- Sum: Yes → (a+b) + (c+d) = a+b+c+d ✓
+- Max: Yes → max(max(a,b), max(c,d)) = max(a,b,c,d) ✓
+- Mean: Yes, with count → (sum₁, n₁) ⊕ (sum₂, n₂) = (sum₁+sum₂, n₁+n₂) ✓
+- Median: No → median of medians ≠ median ✗
+- Softmax: Yes, with (max, sum, output) state ✓
+
+### Property 2: Separability
+
+**Definition:** A function is separable if $f(x, y) = g(x) \cdot h(y)$ for some $g$, $h$.
+
+A matrix is separable (rank-1) if $A = uv^T$. More generally, low-rank if $A = UV^T$ with small inner dimension.
+
+**Why it matters:** Separable computations decompose into independent parts:
+
+- **Factorization:** Store/compute factors instead of full matrix
+- **Decomposition:** Split complex operations into simpler ones
+- **Independence:** Compute factors in parallel
+
+**The LoRA insight:**
+
+Fine-tuning updates the weight matrix: $W' = W + \Delta W$.
+
+Key observation: $\Delta W$ is often **low-rank**. If $\Delta W \approx BA$ where $B \in \mathbb{R}^{d \times r}$, $A \in \mathbb{R}^{r \times k}$:
+
+- Full update: $d \times k$ parameters (millions)
+- LoRA update: $r \times (d + k)$ parameters (thousands when $r \ll d, k$)
+
+This works because fine-tuning doesn't need the full expressivity of the weight space—it moves in a low-dimensional subspace.
+
+**Recognizing separability:**
+
+Ask: "Does this matrix/function have structure I'm not exploiting?"
+
+- Weight updates in fine-tuning → Low-rank (LoRA)
+- Convolution kernels → Separable filters (depthwise separable)
+- Attention patterns → Low-rank attention (Linformer)
+- Covariance matrices → Often low effective rank
+
+### Property 3: Locality
+
+**Definition:** A function has locality if $f(x_i)$ depends only on $x_j$ where $|i - j| < k$ for some small $k$.
+
+More generally: nearby inputs affect nearby outputs more than distant ones.
+
+**Why it matters:** Locality means we can *tile*—process local regions independently:
+
+- **Blocking:** Work on cache-sized blocks
+- **Tiling:** Reuse data while it's in fast memory
+- **Reordering:** Process in cache-friendly order
+- **Distribution:** Assign spatial regions to different processors
+
+**The tiled matrix multiply insight:**
+
+Naive matmul: For each output element, access a full row of A and column of B.
+$$C_{ij} = \sum_k A_{ik} \cdot B_{kj}$$
+
+Problem: Rows of A and columns of B don't fit in cache. Every access goes to DRAM.
+
+Tiled matmul: Process in blocks that fit in cache.
+
+```
+For each block (i,j) of C:
+    For each block k:
+        Load A_block[i,k] into cache  # Fits!
+        Load B_block[k,j] into cache  # Fits!
+        C_block[i,j] += A_block @ B_block
+```
+
+The mathematical property: Matrix multiplication has locality in block structure. The product of blocks equals the block of products.
+
+**Recognizing locality:**
+
+Ask: "What's the dependency radius of this computation?"
+
+- Convolution → Kernel-sized locality ✓
+- Matmul → Block locality (with reordering) ✓
+- Global attention → No locality (everything depends on everything) ✗
+- Local attention → Window-sized locality ✓
+- FFT → Recursive locality (butterfly structure) ✓
+
+### Property 4: Sparsity
+
+**Definition:** A structure is sparse if most of its elements are zero or negligible.
+
+**Why it matters:** Sparsity means we can *skip*—avoid computation on zeros:
+
+- **Zero skipping:** Don't multiply by zero
+- **Conditional computation:** Only activate relevant parts
+- **Pruning:** Remove unimportant weights
+- **Selection:** Choose subset of elements
+
+**The MoE insight:**
+
+Standard dense layer: Every input activates every parameter.
+
+$$y = Wx \quad \text{(all parameters used)}$$
+
+MoE observation: Different inputs need different "experts."
+
+$$y = \sum_{i \in \text{top-}k} g_i \cdot E_i(x) \quad \text{(only k experts used)}$$
+
+The sparsity is in *activation*: most experts are inactive for any given input. This allows scaling parameters without scaling compute.
+
+**Recognizing sparsity:**
+
+Ask: "Is the effective computation smaller than the apparent computation?"
+
+- Attention matrices → Often sparse in practice (local patterns)
+- Network activations → ReLU creates sparsity
+- Expert routing → Only k of n experts active
+- Weight matrices → Can be pruned to 90%+ sparsity
+- Gradient updates → Often sparse (only some parameters matter)
+
+### Property 5: Redundancy
+
+**Definition:** A representation has redundancy if it uses more bits than necessary to encode the information.
+
+**Why it matters:** Redundancy means we can *compress*—use fewer bits without losing information:
+
+- **Quantization:** Fewer bits per value
+- **Caching:** Don't recompute what's already computed
+- **Deduplication:** Store shared structure once
+- **Approximation:** Discard redundant precision
+
+**The quantization insight:**
+
+Neural network weights are stored as FP32 (32 bits). But do they need 32 bits of precision?
+
+Observation: Weights are highly redundant.
+- They cluster around certain values
+- High bits of precision rarely matter for accuracy
+- Relative relationships matter more than absolute values
+
+This is why INT8 and even INT4 quantization works: the information content of weights is far less than 32 bits per weight.
+
+**The KV cache insight:**
+
+In autoregressive generation, we recompute attention over all previous tokens.
+
+Observation: Keys and values for previous tokens don't change.
+
+This is pure redundancy—recomputing the same values. KV caching eliminates this redundancy by storing previously computed values.
+
+**Recognizing redundancy:**
+
+Ask: "Am I representing or computing more than necessary?"
+
+- Repeated computation → Cache it (KV cache, prefix cache)
+- High-precision storage → Quantize it (INT8, INT4)
+- Repeated prefixes → Share them (RadixAttention)
+- Similar vectors → Cluster them (vocabulary quantization)
+
+### Property 6: Symmetry
+
+**Definition:** A function has symmetry if $f(g(x)) = h(f(x))$ for some transformations $g$, $h$.
+
+The most common case: $f(g(x)) = f(x)$ (invariance) or $f(g(x)) = g(f(x))$ (equivariance).
+
+**Why it matters:** Symmetry means we can *share*—use the same computation for transformed inputs:
+
+- **Weight sharing:** Same weights for shifted inputs (convolution)
+- **Equivariant architectures:** Exploit known symmetries
+- **Symmetry reduction:** Reduce problem size by factoring out symmetry
+
+**The convolution insight:**
+
+Images have translation symmetry: a cat in the corner is the same cat as in the center.
+
+Standard approach: Learn separate detectors for every position.
+
+Convolutional approach: Learn one detector, apply everywhere.
+
+$$\text{Parameters: } O(H \times W \times C^2) \rightarrow O(K^2 \times C^2)$$
+
+The weight sharing exploits translation symmetry.
+
+**Recognizing symmetry:**
+
+Ask: "What transformations leave this problem essentially unchanged?"
+
+- Image classification → Translation, (some) rotation
+- Sequence modeling → Time shift
+- Graph neural networks → Permutation of nodes
+- Physics simulation → Physical symmetries (conservation laws)
+
+## The Hardware Amplifier
+
+Mathematical properties are necessary but not sufficient. They tell us *what's legal*. Hardware tells us *what's profitable*.
+
+```
+Property              Hardware Amplifier           Effective Speedup
+────────────────────────────────────────────────────────────────────
+Associativity    ×    Parallel cores              = Parallel scaling
+Separability     ×    Register/cache reuse        = Memory reduction
+Locality         ×    Memory hierarchy            = Cache efficiency
+Sparsity         ×    Conditional execution       = Compute reduction
+Redundancy       ×    Tensor cores (low-bit)      = Throughput increase
+Symmetry         ×    Weight sharing (memory)     = Capacity increase
+```
+
+**Example: FlashAttention**
+
+Property: Associativity of softmax (with proper state)
+
+Hardware amplifier: GPU shared memory (SRAM) is 10-100× faster than HBM
+
+Combined effect:
+- Associativity allows tiling (mathematical enabler)
+- Tiling allows SRAM residence (hardware amplifier)
+- Result: 2-4× speedup
+
+Without associativity, we couldn't tile. Without fast SRAM, tiling wouldn't help. Both are necessary.
+
+## The Recognition Process
+
+How do you look at a computation and see optimization opportunities?
+
+### Step 1: Identify the Bottleneck
+
+Is the computation:
+- **Compute-bound?** → Look for mathematical shortcuts
+- **Memory-bound?** → Look for locality, caching opportunities
+- **Communication-bound?** → Look for parallelization, reduction
+
+### Step 2: Examine the Structure
+
+For each property, ask:
+
+| Property | Question |
+|----------|----------|
+| Associativity | Can I split and merge this computation? |
+| Separability | Does this matrix/function have hidden structure? |
+| Locality | Do nearby outputs depend on nearby inputs? |
+| Sparsity | Are most elements zero or negligible? |
+| Redundancy | Am I computing or storing the same thing twice? |
+| Symmetry | Does the problem look the same under transformation? |
+
+### Step 3: Match to Hardware
+
+For each property you find, ask:
+- What hardware feature amplifies this?
+- Is that hardware feature available and fast enough?
+
+### Step 4: Verify Correctness
+
+Mathematical properties guarantee correctness *when properly applied*:
+- Associativity requires proper state representation
+- Separability requires accuracy bounds
+- Locality requires boundary handling
+- Sparsity requires threshold selection
+- Redundancy requires cache invalidation
+- Symmetry requires equivariant operations
+
+## Case Study: Deriving FlashAttention
+
+Let's apply the framework to derive FlashAttention from first principles.
+
+**The problem:** Standard attention materializes an $N \times N$ matrix, using $O(N^2)$ memory.
+
+**Step 1: Identify bottleneck.**
+Memory-bound. The $N \times N$ matrix doesn't fit in SRAM for large $N$.
+
+**Step 2: Examine structure.**
+
+*Associativity?*
+Softmax: $\frac{e^{x_i}}{\sum_j e^{x_j}}$. Requires global sum—not obviously associative.
+
+But wait. What if we track running (max, sum)?
+
+$$\text{state} = (m, \ell) \text{ where } m = \max(x), \ell = \sum e^{x - m}$$
+
+For two chunks:
+$$m_{new} = \max(m_1, m_2)$$
+$$\ell_{new} = \ell_1 \cdot e^{m_1 - m_{new}} + \ell_2 \cdot e^{m_2 - m_{new}}$$
+
+This is associative! The state forms a monoid.
+
+*Locality?*
+Attention has no inherent locality—every output depends on all inputs. But the *associative structure* creates a kind of "state locality": we only need the running state, not all inputs.
+
+**Step 3: Match to hardware.**
+- GPU has fast SRAM (shared memory): 164KB, ~8TB/s
+- GPU has slow HBM: 80GB, ~2TB/s
+- Associativity allows processing in chunks that fit in SRAM
+
+**Step 4: Verify correctness.**
+The monoid structure mathematically guarantees that chunked processing equals full processing.
+
+**Result:** FlashAttention—$O(N^2)$ compute, $O(N)$ memory, 2-4× speedup.
+
+## The Framework Applied to This Book
+
+Every major topic in this book exploits these properties:
+
+```
+Chapter/Topic              Primary Property    Secondary Property
+────────────────────────────────────────────────────────────────────
+FlashAttention             Associativity       Locality (tiling)
+LoRA                       Separability        Redundancy (fine-tune)
+Matrix Multiply            Locality            Associativity
+Quantization               Redundancy          Sparsity (outliers)
+MoE                        Sparsity            Locality (experts)
+KV Caching                 Redundancy          Associativity (streaming)
+Distributed Training       Associativity       Separability (FSDP)
+State Space Models         Associativity       Separability (kernel)
+Continuous Batching        Associativity       Sparsity (variable load)
+Prefix Caching             Redundancy          Locality (LRU)
+```
+
+## Exercises
+
+1. **Identify the property:** PagedAttention (vLLM) enables efficient memory management. Which property does it exploit? (Hint: It's about avoiding waste.)
+
+2. **Find new applications:** Ring attention exploits associativity to distribute attention across GPUs. What other operations could use ring-style parallelism?
+
+3. **Property combination:** FlashAttention uses associativity + locality. Find an optimization that uses separability + sparsity. (Hint: Consider structured pruning.)
+
+4. **Counterexample:** Find a computation where *none* of the six properties apply. What does this imply about optimization potential?
+
+5. **Novel optimization:** Consider beam search in language models. What properties might enable more efficient implementations?
+
+## Key Takeaways
+
+1. **Properties explain optimizations.** Every speedup traces to mathematical structure.
+
+2. **Six properties cover most cases:** Associativity, separability, locality, sparsity, redundancy, symmetry.
+
+3. **Properties determine legality, hardware determines profit.** Both are necessary.
+
+4. **Recognition is the skill.** Learn to see properties in unfamiliar computations.
+
+5. **Properties compose.** Most powerful optimizations exploit multiple properties.
+
+6. **The framework is generative.** It doesn't just explain known optimizations—it suggests new ones.
+
+## Connections
+
+This chapter provides the theoretical foundation for the entire book:
+
+**Part I (Hardware):** Establishes *why* properties matter—what hardware constraints they address.
+
+**Part II (Algebra):** Deep dives into individual properties and their applications.
+
+**Part III (Investigations):** Extended case studies applying multiple properties to real problems.
+
+**Part IV (Method):** The process of recognizing and applying properties in practice.
+
+Every subsequent chapter can be read through this lens: "What property enables this optimization?"
+
+---
+
+::: {.callout-note}
+## The Generative Power
+
+The framework's true value is *generative*. When you encounter a new problem:
+
+1. Profile to find the bottleneck
+2. Examine the computation for properties
+3. Match properties to available hardware
+4. Derive the optimization
+
+You're not memorizing tricks—you're learning to see structure.
+:::

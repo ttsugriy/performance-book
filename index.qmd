@@ -96,11 +96,70 @@ Most performance resources cover one pillar. This book weaves all three together
 
 The book is designed for multiple reading patterns:
 
-**Linear reading**: Parts build on each other. Part I establishes the hardware reality. Part II introduces the mathematical properties. Part III applies them in extended investigations. Part IV teaches the methodology.
+**Linear reading**: Parts build on each other. The Algebraic Framework establishes the theory. Part I covers hardware. Part II introduces properties. Parts III-IV apply them to algorithms and systems. Part V provides practical tools.
 
-**Investigation hopping**: Each investigation in Part III is somewhat self-contained. If you're curious about FlashAttention specifically, you can start there—with occasional references back to earlier material.
+**Investigation hopping**: Each investigation in Parts III-IV is somewhat self-contained. If you're curious about FlashAttention specifically, you can start there—with occasional references back to earlier material.
 
 **Interactive exploration**: Many chapters include embedded visualizations and linked notebooks. The investigations come alive when you *do* them, not just read them.
+
+---
+
+## Learning Paths
+
+Different readers have different goals. Here are recommended paths through the material:
+
+### Path A: "I want to understand the theory"
+
+For researchers and those seeking deep understanding of *why* optimizations work.
+
+```
+The Algebraic Framework → Part I (Hardware) → Part II (Algebra)
+    → FlashAttention → LoRA → State Space Models
+```
+
+**Focus on:** Mathematical derivations, property recognition, first-principles reasoning.
+
+**Skip:** Hardware reference appendix, tool-specific chapters (can revisit later).
+
+### Path B: "I want to optimize my ML system"
+
+For practitioners building production systems who need practical speedups.
+
+```
+The Algebraic Framework (skim) → Memory Hierarchy → GPU Architecture
+    → Inference → Advanced Serving → GPU Memory → Quantization
+    → Profiling Tools → torch.compile
+```
+
+**Focus on:** Bottleneck identification, configuration tuning, practical patterns.
+
+**Skip:** Mathematical derivations (can revisit for deeper understanding).
+
+### Path C: "I want to write custom kernels"
+
+For engineers who need to implement novel operations or optimize beyond libraries.
+
+```
+GPU Architecture → Matrix Multiply → FlashAttention
+    → Triton → GPU Kernel Frameworks → Profiling Tools
+```
+
+**Focus on:** Memory hierarchy on GPU, tiling patterns, Triton/CUDA programming.
+
+**Skip:** High-level systems chapters (serving, distributed) initially.
+
+### Path D: "I want to understand a specific topic"
+
+Each major topic is approachable with minimal prerequisites:
+
+| Topic | Prerequisites | Chapter(s) |
+|-------|---------------|------------|
+| FlashAttention | Algebraic Framework, Memory Hierarchy | FlashAttention |
+| LoRA | Algebraic Framework, Factoring | LoRA |
+| Quantization | Memory Hierarchy, Bandwidth | Quantization |
+| Distributed Training | Parallelism, GPU Architecture | Distributed |
+| LLM Serving | Inference, GPU Memory | Advanced Serving |
+| MoE | Skipping, Distributed | Mixture of Experts |
 
 ---
 
@@ -160,10 +219,12 @@ This book stands on the shoulders of giants:
 
 ## Let's Begin
 
-The first chapter starts with a fundamental truth about modern hardware—one that most algorithms courses gloss over, one that shapes what "fast" actually means in practice.
+Before diving into hardware specifics or optimization techniques, we need to establish the conceptual framework that ties everything together.
 
-The truth is that memory has hierarchy, and that hierarchy changes everything.
+The next chapter introduces **The Algebraic Framework**—the six fundamental properties that make computational optimization possible. Think of it as a periodic table for performance: once you understand these elements, you can predict which optimizations apply to which problems.
 
-Let's investigate.
+This framework is what separates "I memorized a trick" from "I understand why the trick works."
 
-[**Chapter 1: The Memory Hierarchy →**](chapters/01-memory-hierarchy.qmd)
+Let's begin.
+
+[**The Algebraic Framework →**](chapters/00-algebraic-framework.qmd)
