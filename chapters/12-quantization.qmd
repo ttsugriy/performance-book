@@ -498,6 +498,333 @@ The theme: understand the failure mode (outliers), then design around it.
 
 5. **Always measure**: Perplexity changes hide task-specific degradation
 
+## Advanced Quantization Methods
+
+### GGUF and the llama.cpp Ecosystem
+
+GGUF (GPT-Generated Unified Format) is the standard format for running quantized LLMs on consumer hardware, particularly CPUs.
+
+```
+GGUF Quantization Types:
+
+Type      Bits    Quality     Size (7B model)    Use Case
+────────────────────────────────────────────────────────────
+Q8_0      8       Excellent   7.2 GB             Best quality
+Q6_K      6       Very Good   5.5 GB             Good balance
+Q5_K_M    5       Good        4.8 GB             Recommended default
+Q4_K_M    4       Good        4.1 GB             Memory-limited
+Q4_0      4       Decent      3.8 GB             Fast, lower quality
+Q3_K_M    3       Acceptable  3.3 GB             Extreme compression
+Q2_K      2       Degraded    2.7 GB             Experimental
+```
+
+**K-Quants**: The `_K_` variants use non-uniform quantization with importance weighting:
+
+```python
+# Conceptual K-quant approach
+def k_quant_block(weights, block_size=32):
+    """
+    K-quants use mixed precision within blocks.
+
+    More important weights get more bits.
+    """
+    importance = compute_importance(weights)
+
+    # High-importance weights: more bits
+    # Low-importance weights: fewer bits
+    bits_allocation = allocate_bits(importance, target_avg_bits=4)
+
+    quantized = []
+    for w, bits in zip(weights, bits_allocation):
+        quantized.append(quantize_to_bits(w, bits))
+
+    return quantized
+```
+
+**Using GGUF models**:
+
+```python
+# With llama-cpp-python
+from llama_cpp import Llama
+
+# Load quantized model
+llm = Llama(
+    model_path="./llama-7b.Q4_K_M.gguf",
+    n_ctx=4096,
+    n_gpu_layers=35  # Offload layers to GPU
+)
+
+# Generate
+output = llm("Explain quantum computing:", max_tokens=256)
+```
+
+**When to use GGUF**:
+- CPU inference (optimized for AVX2/AVX-512)
+- Consumer hardware (gaming GPUs, Mac)
+- Mixed CPU/GPU execution
+- Easy deployment (single file, no dependencies)
+
+### HQQ: Half-Quadratic Quantization
+
+HQQ achieves high-quality quantization without calibration data:
+
+```python
+# HQQ key insight: optimize quantization parameters directly
+def hqq_quantize(W, bits=4, axis=1):
+    """
+    HQQ: Zero-shot quantization via half-quadratic optimization.
+
+    No calibration data needed!
+    """
+    # Initialize scale and zero point
+    scale = (W.max(axis=axis) - W.min(axis=axis)) / (2**bits - 1)
+    zero = W.min(axis=axis)
+
+    for iteration in range(num_iterations):
+        # Quantize with current parameters
+        Q = torch.round((W - zero) / scale).clamp(0, 2**bits - 1)
+        W_hat = Q * scale + zero
+
+        # Optimize scale and zero to minimize ||W - W_hat||^2
+        # This is a half-quadratic splitting problem
+        scale, zero = optimize_params(W, Q, scale, zero)
+
+    return Q, scale, zero
+
+# Usage with HQQ library
+from hqq.core.quantize import HQQLinear
+
+# Replace linear layers with HQQ quantized versions
+quantized_layer = HQQLinear(
+    linear_layer,
+    quant_config={'weight_quant_params': {'nbits': 4, 'group_size': 64}}
+)
+```
+
+**HQQ advantages**:
+1. No calibration data required
+2. Fast quantization (minutes, not hours)
+3. Competitive quality with GPTQ/AWQ
+4. Good for dynamic quantization scenarios
+
+### AQLM: Additive Quantization for LLMs
+
+AQLM uses vector quantization with learned codebooks:
+
+```python
+# AQLM: Instead of scalar quantization, use vector quantization
+def aqlm_concept(W, num_codebooks=2, codebook_size=256):
+    """
+    AQLM: Represent weight vectors as sums of codebook entries.
+
+    W[i] ≈ C1[idx1[i]] + C2[idx2[i]] + ...
+    """
+    # Learn codebooks on calibration data
+    codebooks = []
+    for c in range(num_codebooks):
+        codebook = learn_codebook(W, size=codebook_size)
+        codebooks.append(codebook)
+        # Subtract codebook contribution for next round
+        W = W - lookup(codebook, W)
+
+    # Quantized representation: just indices
+    indices = [[find_nearest(W_row, cb) for cb in codebooks] for W_row in W]
+
+    return indices, codebooks
+
+# Dequantization: sum codebook entries
+def aqlm_dequantize(indices, codebooks):
+    W_reconstructed = 0
+    for idx, cb in zip(indices, codebooks):
+        W_reconstructed += cb[idx]
+    return W_reconstructed
+```
+
+**AQLM achieves extreme compression**:
+```
+Model        Method    Bits    Perplexity
+─────────────────────────────────────────
+LLaMA-7B     FP16      16      5.68
+LLaMA-7B     GPTQ      4       5.85 (+3.0%)
+LLaMA-7B     AQLM      2       6.12 (+7.7%)
+LLaMA-7B     AQLM      1.5     6.89 (+21%)
+
+AQLM enables <2-bit quantization with reasonable quality.
+```
+
+### SpQR: Sparse Quantization with Outliers
+
+SpQR handles outliers by keeping them sparse in high precision:
+
+```python
+def spqr_quantize(W, bits=4, outlier_fraction=0.01):
+    """
+    SpQR: Quantize most weights, keep outliers in FP16.
+
+    Outliers stored in sparse format for efficiency.
+    """
+    # Identify outliers (top fraction by magnitude)
+    threshold = torch.quantile(W.abs(), 1 - outlier_fraction)
+    outlier_mask = W.abs() > threshold
+
+    # Store outliers in sparse format
+    outliers_sparse = to_sparse(W[outlier_mask])
+
+    # Quantize the rest
+    W_normal = W.clone()
+    W_normal[outlier_mask] = 0  # Zero out outliers
+    Q, scale, zp = quantize(W_normal, bits)
+
+    return Q, scale, zp, outliers_sparse, outlier_mask
+
+def spqr_dequantize(Q, scale, zp, outliers_sparse, outlier_mask):
+    W = dequantize(Q, scale, zp)
+    W[outlier_mask] = from_sparse(outliers_sparse)
+    return W
+```
+
+**SpQR insight**: 1% of weights in FP16 + 99% in INT3 ≈ 3.1 bits effective with minimal quality loss.
+
+## Quantization-Aware Training (QAT)
+
+### Post-Training vs Training-Aware
+
+All methods above are **post-training quantization (PTQ)**—applied after training.
+
+**Quantization-aware training (QAT)** simulates quantization during training:
+
+```python
+class QATLinear(nn.Module):
+    """Linear layer with quantization-aware training."""
+
+    def __init__(self, in_features, out_features, bits=4):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        self.bits = bits
+
+        # Learnable quantization parameters
+        self.scale = nn.Parameter(torch.ones(1))
+        self.zero_point = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        if self.training:
+            # Fake quantization: quantize then dequantize
+            # Gradients flow through using straight-through estimator
+            W_q = fake_quantize(self.weight, self.scale, self.zero_point, self.bits)
+        else:
+            W_q = real_quantize(self.weight, self.scale, self.zero_point, self.bits)
+
+        return F.linear(x, W_q)
+
+def fake_quantize(W, scale, zero_point, bits):
+    """
+    Fake quantization with straight-through estimator.
+
+    Forward: quantize → dequantize (simulates quantization)
+    Backward: gradients pass through unchanged
+    """
+    # Quantize
+    W_int = torch.round(W / scale + zero_point)
+    W_int = W_int.clamp(0, 2**bits - 1)
+
+    # Dequantize
+    W_fake = (W_int - zero_point) * scale
+
+    # Straight-through estimator: use W_fake for forward, W.grad for backward
+    return W + (W_fake - W).detach()
+```
+
+### QAT Workflow
+
+```python
+def qat_training(model, train_loader, epochs=3):
+    """
+    Quantization-aware training workflow.
+    """
+    # 1. Replace layers with QAT versions
+    model = prepare_qat(model, bits=4)
+
+    # 2. Train with fake quantization
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+
+    for epoch in range(epochs):
+        for batch in train_loader:
+            loss = model(batch)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+    # 3. Convert to actual quantized model
+    quantized_model = convert_to_quantized(model)
+
+    return quantized_model
+
+# PyTorch native QAT
+import torch.quantization as quant
+
+model = MyModel()
+
+# Prepare for QAT
+model.qconfig = quant.get_default_qat_qconfig('fbgemm')
+model_prepared = quant.prepare_qat(model)
+
+# Train...
+train(model_prepared)
+
+# Convert to quantized
+model_quantized = quant.convert(model_prepared)
+```
+
+### When to Use QAT
+
+```
+PTQ (Post-Training Quantization):
+  ✓ No training data/compute needed
+  ✓ Fast (minutes to hours)
+  ✓ Good for 8-bit and 4-bit
+  ✗ Quality degrades at extreme compression
+
+QAT (Quantization-Aware Training):
+  ✓ Best quality at low bit-widths
+  ✓ Model adapts to quantization
+  ✓ Essential for 2-3 bit quantization
+  ✗ Requires training (expensive)
+  ✗ Needs training data
+```
+
+**Decision**:
+- INT8: PTQ is usually sufficient
+- INT4: PTQ (GPTQ/AWQ) often works, try QAT if quality insufficient
+- INT2-3: QAT almost always needed
+
+## Choosing the Right Method
+
+```
+Decision tree for quantization method:
+
+Need <2 bits?
+  └─ Yes → AQLM or QAT
+  └─ No → Continue
+
+Have calibration data?
+  └─ No → HQQ (zero-shot)
+  └─ Yes → Continue
+
+Target platform?
+  └─ CPU/Mac → GGUF (llama.cpp)
+  └─ NVIDIA GPU → Continue
+  └─ AMD GPU → GGUF or AWQ
+
+Quality sensitivity?
+  └─ High → AWQ or GPTQ with group_size=32
+  └─ Medium → GPTQ with group_size=128
+  └─ Low → GPTQ with group_size=-1 (per-tensor)
+
+Memory extremely limited?
+  └─ Yes → SpQR (3-bit) or AQLM (2-bit)
+  └─ No → AWQ or GPTQ (4-bit)
+```
+
 ## Connections
 
 **Chapter 5 (Factoring)**: Quantization and low-rank share a theme—the model doesn't need all its precision
@@ -513,7 +840,8 @@ The accompanying notebook walks through:
 
 - Implementing uniform quantization from scratch
 - Visualizing the outlier problem in LLMs
-- Comparing GPTQ, AWQ, and naive quantization
+- Comparing GPTQ, AWQ, HQQ, and naive quantization
+- Converting models to GGUF format
 - Measuring perplexity impact
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/13-quantization-investigation.ipynb)
@@ -525,4 +853,9 @@ The accompanying notebook walks through:
 - Frantar et al. (2022). "GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers"
 - Lin et al. (2023). "AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration"
 - Xiao et al. (2023). "SmoothQuant: Accurate and Efficient Post-Training Quantization for Large Language Models"
+- Badri & Shaji (2023). "HQQ: Half-Quadratic Quantization"
+- Egiazarian et al. (2024). "AQLM: Extreme Compression of Large Language Models via Additive Quantization"
+- Dettmers & Zettlemoyer (2023). "SpQR: A Sparse-Quantized Representation for Near-Lossless LLM Weight Compression"
+- [GGUF Format Specification](https://github.com/ggerganov/ggml/blob/master/docs/gguf.md)
+
 
