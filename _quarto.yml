@@ -51,6 +51,7 @@ book:
         - chapters/21-triton.qmd
         - chapters/22-numerical-precision.qmd
         - chapters/23-production-cases.qmd
+        - chapters/29-torch-compile.qmd
     - part: "Appendices"
       chapters:
         - chapters/glossary.qmd
