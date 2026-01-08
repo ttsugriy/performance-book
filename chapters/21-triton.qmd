@@ -599,6 +599,220 @@ BLOCK_SIZE = 512  # Mismatch! Will fail
 
 Use `tl.constexpr` to catch at compile time.
 
+## Triton 3.0 and Beyond
+
+### Multi-Backend Support
+
+Triton now supports multiple GPU backends, not just NVIDIA:
+
+```python
+# AMD GPUs via ROCm
+TRITON_HIP=1 python my_triton_script.py
+
+# Intel GPUs via XPU
+TRITON_XPU=1 python my_triton_script.py
+
+# Same kernel works on all!
+@triton.jit
+def my_kernel(...):
+    # Identical code
+    pass
+```
+
+**Supported backends (Triton 3.x):**
+```
+Backend         Status          Notes
+─────────────────────────────────────────────────
+NVIDIA (CUDA)   Stable          Primary, best optimized
+AMD (ROCm)      Stable          MI300X, MI250X support
+Intel (XPU)     Experimental    Max/Flex GPUs
+CPU             Experimental    For debugging
+```
+
+### Autotuning Improvements
+
+Triton 3.0 has better autotuning infrastructure:
+
+```python
+@triton.autotune(
+    configs=[
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 256, 'BLOCK_K': 64}, num_stages=3, num_warps=8),
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 256, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 128, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'BLOCK_K': 32}, num_stages=5, num_warps=2),
+    ],
+    key=['M', 'N', 'K'],
+    prune_configs_by={
+        'early_config_prune': matmul_config_pruner,  # Custom pruning
+        'perf_model': estimate_matmul_time,  # Performance model
+    },
+    warmup=25,
+    rep=100,
+)
+@triton.jit
+def matmul_kernel(...):
+    ...
+```
+
+**New autotuning features:**
+- `num_stages`: Pipeline depth (more overlapping)
+- `num_warps`: Warps per program (occupancy tuning)
+- Custom pruning to skip obviously bad configs
+- Performance models to guide search
+
+### Descriptor-Based Loads (Experimental)
+
+Triton is adding TMA-like descriptor loads for Hopper:
+
+```python
+@triton.jit
+def kernel_with_descriptors(
+    A_ptr, B_ptr, C_ptr,
+    ...
+    # Descriptor enables hardware-managed loads
+    A_desc: tl.tensor_descriptor,
+):
+    # Hardware manages the load
+    a_tile = tl.load_tile(A_desc, [block_m_idx, block_k_idx])
+
+    # vs. traditional pointer-based
+    a_ptr_offset = A_ptr + offsets_m[:, None] * stride_am + offsets_k[None, :] * stride_ak
+    a_tile_ptr = tl.load(a_ptr_offset)
+```
+
+**Benefits:**
+- Hardware handles address calculation
+- Better memory access patterns
+- Reduced register pressure
+
+### Persistent Kernels
+
+For small operations, kernel launch overhead dominates. Persistent kernels help:
+
+```python
+@triton.jit
+def persistent_kernel(
+    A_ptr, B_ptr, C_ptr, D_ptr,
+    num_tasks,
+    BLOCK_SIZE: tl.constexpr,
+):
+    # Get program ID
+    pid = tl.program_id(0)
+
+    # Persistent: each program processes multiple tiles
+    num_programs = tl.num_programs(0)
+
+    for task_id in range(pid, num_tasks, num_programs):
+        # Compute which tile this is
+        tile_m = task_id // num_tiles_n
+        tile_n = task_id % num_tiles_n
+
+        # Process tile
+        offs_m = tile_m * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        offs_n = tile_n * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+
+        # Load, compute, store...
+```
+
+**Use case:** Many small operations (MoE expert computations, sparse ops)
+
+### Integration with torch.compile
+
+Triton kernels now integrate seamlessly with `torch.compile`:
+
+```python
+import torch
+import triton
+import triton.language as tl
+
+@triton.jit
+def my_triton_kernel(...):
+    ...
+
+# Register as custom op
+torch.library.custom_op("mylib::my_op", my_triton_function)
+
+# Torch.compile will use it
+@torch.compile
+def my_model(x):
+    return torch.ops.mylib.my_op(x)
+
+# Or use Triton directly via inductor
+# torch.compile generates Triton for fused ops automatically!
+```
+
+**TorchInductor generates Triton:**
+```python
+# This PyTorch code...
+y = torch.relu(x @ weight + bias)
+
+# ...becomes this Triton (automatically!)
+@triton.jit
+def fused_matmul_bias_relu(...)
+    ...
+```
+
+### Triton Distributed (Experimental)
+
+For multi-GPU kernels with overlapped communication:
+
+```python
+from triton.distributed import (
+    DistributedTensor,
+    all_gather,
+    reduce_scatter,
+)
+
+@triton.jit
+def distributed_matmul_kernel(
+    A: DistributedTensor,  # Sharded across GPUs
+    B: DistributedTensor,
+    C: DistributedTensor,
+    ...
+):
+    # All-gather A across GPUs
+    A_full = all_gather(A, dim=0)
+
+    # Local matmul
+    C_local = tl.dot(A_full, B)
+
+    # Reduce-scatter result
+    reduce_scatter(C_local, C, dim=0)
+```
+
+**Use case:** Custom distributed ops that overlap compute and communication.
+
+### Best Practices for Triton 3.0
+
+```python
+# 1. Use autotuning for performance-critical kernels
+@triton.autotune(configs=[...], key=['M', 'N'])
+@triton.jit
+def kernel(...):
+    ...
+
+# 2. Specify precision explicitly
+acc = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)  # FP32 accumulator
+result = acc.to(tl.float16)  # Convert at end
+
+# 3. Use tl.dot for matrix ops (uses tensor cores)
+c = tl.dot(a, b)  # Good
+c = a @ b  # Also works but less explicit
+
+# 4. Profile with triton.testing
+@triton.testing.perf_report(
+    triton.testing.Benchmark(
+        x_names=['M', 'N'],
+        x_vals=[128 * i for i in range(2, 33)],
+        ...
+    )
+)
+def benchmark(M, N):
+    ...
+```
+
 ## Connections
 
 **Chapter 4 (GPU Architecture)**: Triton abstracts GPU details but understanding grids/blocks/shared memory helps.
@@ -619,11 +833,15 @@ Use `tl.constexpr` to catch at compile time.
 
 4. **Use compile-time constants**: `tl.constexpr` enables optimization.
 
-5. **Profile before claiming victory**: Verify performance with Nsight.
+5. **Multi-backend support**: Same kernel runs on NVIDIA, AMD, and Intel GPUs.
 
-6. **Don't replace optimized libraries**: cuBLAS and cuDNN are still king for basic ops.
+6. **Autotuning is essential**: Use `@triton.autotune` for production kernels.
 
-7. **Start simple**: Vector ops → softmax → layer norm → attention.
+7. **torch.compile generates Triton**: TorchInductor uses Triton under the hood.
+
+8. **Profile before claiming victory**: Verify performance with Nsight.
+
+9. **Don't replace optimized libraries**: cuBLAS and cuDNN are still king for basic ops.
 
 ---
 
@@ -643,9 +861,11 @@ By week 5, you'll be writing production-quality custom kernels.
 
 ## Further Reading
 
-- Triton documentation: https://triton-lang.org/
-- OpenAI Triton blog: https://openai.com/blog/triton/
-- Triton tutorials: https://triton-lang.org/main/getting-started/tutorials/
-- FlashAttention repo (Triton implementation): https://github.com/Dao-AILab/flash-attention
+- [Triton Documentation](https://triton-lang.org/)
+- [OpenAI Triton Introduction](https://openai.com/blog/triton/)
+- [Triton Tutorials](https://triton-lang.org/main/getting-started/tutorials/)
+- [Triton GitHub (backends, examples)](https://github.com/triton-lang/triton)
+- [FlashAttention Triton Implementation](https://github.com/Dao-AILab/flash-attention)
+- [Triton Distributed Paper](https://arxiv.org/abs/2504.19442) - Multi-GPU kernel programming
 
 ---
