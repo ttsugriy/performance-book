@@ -100,6 +100,97 @@ Standard attention also reads K and V once—the difference is it's doing a larg
 
 **Problem**: We've traded memory for memory bandwidth. That's not a good trade.
 
+## The Roads Not Taken
+
+Before finding the right path, let's examine approaches that seem promising but fall short. Understanding why they fail clarifies what we actually need.
+
+### Attempt 2: Gradient Checkpointing
+
+A standard trick for memory-constrained training: don't store intermediate activations; recompute them during backprop.
+
+```python
+def attention_checkpointed(Q, K, V):
+    # Forward: compute and store only O
+    S = Q @ K.T
+    P = softmax(S)
+    O = P @ V
+    # Don't save S or P—will recompute during backward
+    return O
+```
+
+**Why it fails**: Checkpointing reduces *activation* memory during training, but not *working* memory during the forward pass. We still materialize the full n² matrix at some point. The memory spike remains.
+
+Gradient checkpointing is orthogonal to FlashAttention—you can use both together. But it doesn't solve the forward pass memory problem.
+
+### Attempt 3: Sparse Attention
+
+If n² is too expensive, why not make attention sparse?
+
+```python
+def sparse_attention(Q, K, V, pattern='local'):
+    if pattern == 'local':
+        # Only attend to nearby positions
+        window = 256
+        # ... compute only within window
+    elif pattern == 'strided':
+        # Attend to every k-th position
+        stride = 64
+        # ...
+```
+
+Approaches like Longformer, BigBird, and Sparse Transformers use fixed sparsity patterns to achieve O(n) or O(n√n) complexity.
+
+**Why it fails for us**: Sparse attention is an *approximation*. It changes what the model computes, not just how it computes. For many tasks, full attention significantly outperforms sparse variants.
+
+We want the exact same output as standard attention—just computed more efficiently.
+
+### Attempt 4: Low-Rank Approximation
+
+Maybe we can approximate the attention matrix with something lower-rank?
+
+```python
+def linear_attention(Q, K, V):
+    # Approximate: instead of softmax(QK^T)V
+    # Use: phi(Q) @ (phi(K)^T @ V)
+    # where phi is a feature map
+    Q_feat = feature_map(Q)  # n×r
+    K_feat = feature_map(K)  # n×r
+    return Q_feat @ (K_feat.T @ V)  # n×r × r×n × n×d = O(nrd)
+```
+
+Performers, Linear Transformers, and similar approaches use this trick.
+
+**Why it fails for us**: Again, this is an approximation. The feature map $\phi$ doesn't perfectly reproduce softmax behavior. For some tasks it works well; for others, quality degrades significantly.
+
+We want exact attention.
+
+### Attempt 5: Sampling-Based Approximation
+
+What if we sample a subset of key-value pairs?
+
+```python
+def sampled_attention(Q, K, V, sample_size=256):
+    # Randomly sample positions
+    idx = np.random.choice(n, sample_size, replace=False)
+    K_sampled = K[idx]
+    V_sampled = V[idx]
+    return softmax(Q @ K_sampled.T) @ V_sampled
+```
+
+**Why it fails**: Sampling introduces variance. Critical tokens might be missed. Quality is unpredictable.
+
+### What We Actually Need
+
+Looking at these failures, the requirements become clear:
+
+1. **Exact computation**: Same output as standard attention (bit-for-bit, modulo floating point)
+2. **Bounded memory**: Don't materialize the full n² matrix
+3. **Efficient execution**: Can't just be correct; must be fast
+
+The first attempt (row-by-row) achieved #1 and #2 but failed #3. The approximation methods achieved #2 and #3 but failed #1.
+
+Is there a solution that achieves all three?
+
 ## The Key Insight: Tiles, Not Rows
 
 The row-by-row approach processes one query at a time. But GPU operations are efficient with larger tiles.
@@ -546,7 +637,7 @@ The accompanying notebook walks through:
 - Comparing memory usage to standard attention
 - Profiling SRAM vs. HBM access patterns
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/11-flash-attention-derivation.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/11-flash-attention.ipynb)
 :::
 
 ---
