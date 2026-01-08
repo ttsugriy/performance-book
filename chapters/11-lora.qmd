@@ -11,6 +11,16 @@ LoRA fine-tunes with 0.01% of the parameters—and often works just as well.
 How is this possible?
 :::
 
+::: {.callout-note}
+## Property Spotlight: Separability
+
+This chapter is a case study in **separability**—the second property from our [Algebraic Framework](00-algebraic-framework.qmd).
+
+When a structure $A$ can be expressed as $UV^T$ where $U$ and $V$ are much smaller than $A$, we have a separable (low-rank) structure. LoRA's insight is that fine-tuning updates $\Delta W$ are separable: they live in a low-dimensional subspace.
+
+This chapter investigates *why* fine-tuning is low-rank and how to exploit that structure.
+:::
+
 ## The Puzzle
 
 Let's put numbers to the puzzle.

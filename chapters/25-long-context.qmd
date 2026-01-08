@@ -12,6 +12,18 @@ Claude handles 200,000 tokens. Gemini claims 1 million. GPT-4 Turbo supports 128
 Standard attention is O(n²). How do you attend to a million tokens?
 :::
 
+::: {.callout-note}
+## Property Spotlight: Locality & Sparsity
+
+This chapter combines **locality** and **sparsity**—the third and fourth properties from our [Algebraic Framework](00-algebraic-framework.qmd).
+
+**Locality**: Sliding window attention exploits the observation that most token interactions are local—tokens rarely need information from distant tokens. This lets us replace O(n²) full attention with O(n·w) local windows.
+
+**Sparsity**: Sparse attention patterns (Longformer, BigBird) keep only a small fraction of the full attention matrix—global tokens, local windows, random connections. The full n×n matrix is sparse, so we never compute it.
+
+Both properties break the quadratic barrier through different mechanisms: locality restricts *which* computations matter; sparsity encodes that restriction structurally.
+:::
+
 ## The Long-Context Challenge
 
 Attention has quadratic complexity in sequence length:

@@ -9,6 +9,16 @@ Don't explain FlashAttention. Derive it.
 The insight isn't the algorithm—it's the question that leads to it.
 :::
 
+::: {.callout-note}
+## Property Spotlight: Associativity
+
+This chapter is a case study in **associativity**—the first property from our [Algebraic Framework](00-algebraic-framework.qmd).
+
+Softmax-weighted sums can be computed incrementally: $(a ⊕ b) ⊕ c = a ⊕ (b ⊕ c)$. This associative structure is what makes chunking possible. Without it, we'd be forced to materialize the full n×n attention matrix.
+
+The derivation that follows shows how recognizing associativity leads directly to the FlashAttention algorithm.
+:::
+
 ## The Problem
 
 Attention is the heart of the transformer. But it has a memory problem.

@@ -12,6 +12,16 @@ GPT-4 reportedly has over a trillion parameters. Yet it runs at reasonable speed
 Mixture of Experts achieves massive model capacity with sublinear compute cost.
 :::
 
+::: {.callout-note}
+## Property Spotlight: Sparsity
+
+This chapter is a case study in **sparsity**—the fourth property from our [Algebraic Framework](00-algebraic-framework.qmd).
+
+In MoE, the activation pattern is sparse: only k of N experts activate for each token. This isn't an approximation—it's the architecture itself. By designing for sparsity, MoE achieves massive capacity with constant compute.
+
+Most scaling techniques accept the computation and try to do it faster. MoE asks: what if we simply *skip* most of the computation?
+:::
+
 ## The Scaling Dilemma
 
 Dense transformers face a fundamental tradeoff:

@@ -10,6 +10,16 @@ GPT-3 has 175 billion parameters. At FP16, that's 350GB. The largest single GPU 
 The math doesn't work. Training large models requires distribution across multiple GPUs—and that introduces fundamental challenges in parallelism, communication, and memory.
 :::
 
+::: {.callout-note}
+## Property Spotlight: Associativity
+
+This chapter exploits **associativity**—the first property from our [Algebraic Framework](00-algebraic-framework.qmd).
+
+Gradient averaging is associative: $(g_1 + g_2) + g_3 = g_1 + (g_2 + g_3)$. This enables ring-allreduce, tree reductions, and arbitrary partitioning of gradient synchronization. Matrix multiplications in tensor parallelism also exploit associativity—we can split along different dimensions because the underlying algebra permits regrouping.
+
+Without associativity, distributed training would require centralized coordination for every operation.
+:::
+
 ## The Three Dimensions of Parallelism
 
 Distributed training can parallelize along three axes:

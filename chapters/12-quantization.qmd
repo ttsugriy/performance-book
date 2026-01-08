@@ -11,6 +11,16 @@ You've just thrown away 87.5% of the information.
 The model still works. How?
 :::
 
+::: {.callout-note}
+## Property Spotlight: Redundancy
+
+This chapter is a case study in **redundancy**—the fifth property from our [Algebraic Framework](00-algebraic-framework.qmd).
+
+When the information content of data is less than its representation size, we have redundancy. Neural network weights contain far less information than their 32-bit encoding suggests. Quantization exploits this gap.
+
+This chapter investigates *why* neural networks tolerate aggressive quantization and how to push further without breaking.
+:::
+
 ## The Paradox
 
 Neural network weights are typically stored as 32-bit or 16-bit floating-point numbers. That precision seems necessary—after all, training involves subtle gradient updates.
