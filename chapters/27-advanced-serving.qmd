@@ -1,0 +1,653 @@
+---
+title: "Advanced LLM Serving"
+subtitle: "Production Techniques for High-Throughput Inference"
+id: sec-advanced-serving
+---
+
+---
+
+::: {.chapter-opener}
+Serving LLMs at scale is a systems engineering challenge. Latency SLAs, cost efficiency, and reliability all matter.
+
+This chapter covers the techniques that power production inference at companies serving billions of requests.
+:::
+
+## Beyond Basic Inference
+
+Chapter 14 covered fundamentals: KV caching, continuous batching, speculative decoding. This chapter goes deeper into production-grade techniques.
+
+```
+Production LLM serving requirements:
+
+Latency:      P99 < 200ms time-to-first-token
+Throughput:   10,000+ requests/second
+Cost:         < $0.001 per 1K tokens
+Reliability:  99.9% uptime
+Flexibility:  Multiple models, variable load
+```
+
+## Prefix Caching and RadixAttention
+
+### The Observation
+
+Many requests share common prefixes:
+
+```
+System prompt (shared):
+  "You are a helpful AI assistant. Be concise and accurate..."
+
+User requests:
+  Request 1: [system prompt] + "What is the capital of France?"
+  Request 2: [system prompt] + "Explain quantum computing."
+  Request 3: [system prompt] + "Write a haiku about coding."
+
+The system prompt KV cache is recomputed for every request.
+```
+
+### RadixAttention (SGLang)
+
+Store KV caches in a radix tree, share across requests:
+
+```python
+class RadixCache:
+    """
+    Radix tree for prefix caching.
+
+    Key insight: Common prefixes share KV cache.
+    """
+    def __init__(self):
+        self.root = RadixNode()
+
+    def insert(self, tokens, kv_cache):
+        """Insert KV cache for token sequence."""
+        node = self.root
+        for i, token in enumerate(tokens):
+            if token not in node.children:
+                node.children[token] = RadixNode()
+            node = node.children[token]
+            node.kv_cache = kv_cache[i]  # Store per-position KV
+
+    def lookup(self, tokens):
+        """Find longest matching prefix."""
+        node = self.root
+        matched = 0
+        kv_cache = []
+
+        for token in tokens:
+            if token in node.children:
+                node = node.children[token]
+                kv_cache.append(node.kv_cache)
+                matched += 1
+            else:
+                break
+
+        return matched, kv_cache
+
+# Usage:
+cache = RadixCache()
+
+# First request computes full KV cache
+kv = model.prefill("You are helpful...")
+cache.insert(tokenize("You are helpful..."), kv)
+
+# Second request reuses cached prefix
+prefix_len, cached_kv = cache.lookup(tokenize("You are helpful..."))
+# Only compute KV for new tokens!
+```
+
+### Memory Management
+
+Prefix caching needs smart eviction:
+
+```python
+class LRUPrefixCache:
+    def __init__(self, max_memory_gb):
+        self.max_memory = max_memory_gb * 1e9
+        self.cache = OrderedDict()  # LRU order
+        self.current_memory = 0
+
+    def get_or_compute(self, prefix_tokens, model):
+        key = hash(tuple(prefix_tokens))
+
+        if key in self.cache:
+            # Move to end (most recently used)
+            self.cache.move_to_end(key)
+            return self.cache[key]
+
+        # Compute new KV cache
+        kv = model.prefill(prefix_tokens)
+        kv_size = self.compute_size(kv)
+
+        # Evict if necessary
+        while self.current_memory + kv_size > self.max_memory:
+            self.evict_oldest()
+
+        self.cache[key] = kv
+        self.current_memory += kv_size
+        return kv
+```
+
+**Performance impact**:
+```
+System prompt: 500 tokens
+User query: 50 tokens
+
+Without prefix caching: 550 tokens prefill per request
+With prefix caching: 50 tokens prefill per request (first request caches)
+
+Speedup: 11x for time-to-first-token on repeated prefixes
+```
+
+## Chunked Prefill
+
+### The Problem
+
+Long prefill blocks decode:
+
+```
+Timeline without chunked prefill:
+
+Request A (long prompt): [==========PREFILL==========][decode][decode]...
+Request B (arrives during A's prefill):
+                         waiting... waiting... [PREFILL][decode]...
+                         ↑ High latency for B!
+```
+
+### The Solution
+
+Split prefill into chunks, interleave with decode:
+
+```python
+class ChunkedPrefillScheduler:
+    def __init__(self, chunk_size=512):
+        self.chunk_size = chunk_size
+        self.prefill_queue = []
+        self.decode_queue = []
+
+    def schedule_iteration(self):
+        """
+        Each iteration: some prefill tokens + some decode tokens.
+        """
+        batch = []
+
+        # Add decode requests (high priority for latency)
+        for req in self.decode_queue[:MAX_DECODE]:
+            batch.append(('decode', req, 1))  # 1 token per decode
+
+        # Fill remaining capacity with prefill chunks
+        remaining_capacity = MAX_TOKENS - len(batch)
+        for req in self.prefill_queue:
+            if remaining_capacity <= 0:
+                break
+
+            tokens_remaining = req.total_tokens - req.processed_tokens
+            chunk = min(tokens_remaining, self.chunk_size, remaining_capacity)
+
+            batch.append(('prefill', req, chunk))
+            remaining_capacity -= chunk
+
+        return batch
+```
+
+**Timeline with chunked prefill**:
+
+```
+Request A: [prefill_chunk][decode B][prefill_chunk][decode B]...
+Request B: waiting... [prefill][decode][decode]...
+                     ↑ Much lower latency!
+```
+
+## Disaggregated Serving
+
+### The Observation
+
+Prefill and decode have different characteristics:
+
+```
+Prefill:
+  - Compute-bound (matrix multiplies)
+  - High parallelism (many tokens)
+  - Batch-friendly
+  - High memory bandwidth for KV cache write
+
+Decode:
+  - Memory-bound (reading KV cache)
+  - Sequential (one token at a time)
+  - Latency-sensitive
+  - Low compute intensity
+```
+
+### Split Prefill and Decode
+
+Run on different GPU pools:
+
+```python
+class DisaggregatedServer:
+    def __init__(self):
+        self.prefill_workers = GPUPool(gpu_type='A100', count=4)
+        self.decode_workers = GPUPool(gpu_type='L4', count=16)  # Cheaper GPUs
+        self.kv_cache_store = DistributedKVStore()
+
+    async def handle_request(self, prompt):
+        # 1. Prefill on high-compute GPUs
+        kv_cache = await self.prefill_workers.prefill(prompt)
+
+        # 2. Store KV cache in distributed store
+        cache_id = await self.kv_cache_store.put(kv_cache)
+
+        # 3. Decode on memory-optimized GPUs
+        output = await self.decode_workers.decode(cache_id)
+
+        return output
+```
+
+**Benefits**:
+- Prefill: Use fewer, more powerful GPUs (compute-bound)
+- Decode: Use more, cheaper GPUs (memory-bound)
+- Better overall cost efficiency
+
+**Challenges**:
+- KV cache transfer latency
+- Complexity of distributed state
+
+## Speculative Decoding Advances
+
+### Beyond Simple Speculation
+
+Chapter 14 covered basic speculative decoding. Advanced techniques:
+
+**1. Medusa: Multiple Heads**
+
+Add prediction heads that output multiple future tokens:
+
+```python
+class MedusaModel(nn.Module):
+    def __init__(self, base_model, num_heads=4):
+        super().__init__()
+        self.base = base_model
+        # Each head predicts a different future position
+        self.heads = nn.ModuleList([
+            nn.Linear(hidden_dim, vocab_size)
+            for _ in range(num_heads)
+        ])
+
+    def forward(self, x):
+        hidden = self.base(x)  # [batch, seq, hidden]
+
+        # Main prediction (next token)
+        logits_0 = self.base.lm_head(hidden[:, -1:])
+
+        # Speculative predictions (tokens 2, 3, 4, ...)
+        speculative_logits = [
+            head(hidden[:, -1:])
+            for head in self.heads
+        ]
+
+        return logits_0, speculative_logits
+```
+
+**Verification**: Single forward pass verifies all speculative tokens.
+
+**2. EAGLE: Draft with Hidden States**
+
+Use hidden states, not tokens, for drafting:
+
+```python
+class EAGLEDraft:
+    """
+    Draft using feature-level prediction.
+    """
+    def draft(self, hidden_states, num_tokens):
+        drafts = []
+
+        h = hidden_states
+        for _ in range(num_tokens):
+            # Predict next hidden state
+            h_next = self.feature_predictor(h)
+
+            # Decode to token
+            logits = self.lm_head(h_next)
+            token = logits.argmax(-1)
+
+            drafts.append(token)
+            h = h_next
+
+        return drafts
+```
+
+**Advantage**: Captures more information than token-level drafting.
+
+**3. Lookahead Decoding**
+
+Speculate using n-gram patterns from the input:
+
+```python
+def lookahead_decode(model, prompt, n=5):
+    """
+    Use n-grams from prompt to speculate future tokens.
+    """
+    # Build n-gram table from prompt
+    ngrams = extract_ngrams(prompt, n)
+
+    tokens = prompt
+    while not done:
+        # Get current n-gram
+        current_ngram = tuple(tokens[-n:])
+
+        if current_ngram in ngrams:
+            # Speculate based on seen pattern
+            speculation = ngrams[current_ngram]
+            # Verify with single forward pass
+            verified = verify(model, tokens, speculation)
+            tokens.extend(verified)
+        else:
+            # Standard decoding
+            next_token = model.decode_one(tokens)
+            tokens.append(next_token)
+
+    return tokens
+```
+
+## Batch Scheduling Strategies
+
+### Priority-Based Scheduling
+
+Not all requests are equal:
+
+```python
+class PriorityScheduler:
+    def __init__(self):
+        self.queues = {
+            'realtime': deque(),   # Interactive chat
+            'standard': deque(),   # API requests
+            'batch': deque()       # Background jobs
+        }
+        self.weights = {'realtime': 10, 'standard': 5, 'batch': 1}
+
+    def select_batch(self, max_tokens):
+        """
+        Weighted fair scheduling across priority classes.
+        """
+        batch = []
+        tokens_used = 0
+
+        # Round-robin with weights
+        for priority in ['realtime', 'standard', 'batch']:
+            weight = self.weights[priority]
+            queue = self.queues[priority]
+
+            for _ in range(weight):
+                if queue and tokens_used < max_tokens:
+                    req = queue.popleft()
+                    batch.append(req)
+                    tokens_used += req.tokens_needed
+
+        return batch
+```
+
+### Preemption
+
+Sometimes you need to preempt running requests:
+
+```python
+class PreemptibleScheduler:
+    def __init__(self, preemption_threshold_ms=100):
+        self.threshold = preemption_threshold_ms
+
+    def maybe_preempt(self, running_requests, new_request):
+        """
+        Preempt low-priority request if high-priority arrives.
+        """
+        if new_request.priority != 'realtime':
+            return None  # Only preempt for realtime
+
+        # Find lowest priority request
+        for req in sorted(running_requests, key=lambda r: r.priority):
+            if req.priority == 'batch':
+                # Save state for later resumption
+                saved_state = self.save_kv_cache(req)
+                self.queues['batch'].appendleft((req, saved_state))
+                return req  # Preempt this one
+
+        return None
+```
+
+## Multi-Model Serving
+
+### Model Multiplexing
+
+Serve multiple models efficiently:
+
+```python
+class MultiModelServer:
+    def __init__(self, gpu_memory_gb=80):
+        self.memory_budget = gpu_memory_gb * 1e9
+        self.loaded_models = {}  # model_id -> model
+        self.model_sizes = {}
+
+    def load_model(self, model_id):
+        """Load model, evicting others if necessary."""
+        size = self.get_model_size(model_id)
+
+        # Evict until we have space
+        while self.current_memory() + size > self.memory_budget:
+            self.evict_lru_model()
+
+        model = load_from_disk(model_id)
+        self.loaded_models[model_id] = model
+        self.model_sizes[model_id] = size
+
+    async def infer(self, model_id, prompt):
+        if model_id not in self.loaded_models:
+            self.load_model(model_id)
+
+        return await self.loaded_models[model_id].generate(prompt)
+```
+
+### LoRA Serving
+
+Efficient serving of many LoRA adapters:
+
+```python
+class LoRAServer:
+    def __init__(self, base_model):
+        self.base = base_model
+        self.adapters = {}  # adapter_id -> (A, B) matrices
+
+    def load_adapter(self, adapter_id, adapter_path):
+        """Load LoRA adapter (small, can cache many)."""
+        A, B = load_lora_weights(adapter_path)
+        self.adapters[adapter_id] = (A.cuda(), B.cuda())
+
+    def forward(self, x, adapter_id):
+        """Forward with specific adapter."""
+        A, B = self.adapters[adapter_id]
+
+        # Base model forward
+        base_out = self.base(x)
+
+        # LoRA forward
+        lora_out = (x @ A) @ B
+
+        return base_out + lora_out
+
+    def batched_forward(self, requests):
+        """
+        Batch requests with different adapters.
+
+        Uses batched matrix multiply with adapter indices.
+        """
+        # Group by adapter
+        by_adapter = defaultdict(list)
+        for req in requests:
+            by_adapter[req.adapter_id].append(req)
+
+        # Process each adapter group
+        outputs = []
+        for adapter_id, reqs in by_adapter.items():
+            batch = torch.stack([r.input for r in reqs])
+            out = self.forward(batch, adapter_id)
+            outputs.extend(zip(reqs, out))
+
+        return outputs
+```
+
+## Monitoring and Observability
+
+### Key Metrics
+
+```python
+class ServingMetrics:
+    def __init__(self):
+        self.metrics = defaultdict(list)
+
+    def record_request(self, req):
+        # Latency metrics
+        self.metrics['ttft'].append(req.time_to_first_token)
+        self.metrics['tpot'].append(req.time_per_output_token)
+        self.metrics['total_latency'].append(req.total_latency)
+
+        # Throughput metrics
+        self.metrics['input_tokens'].append(req.input_length)
+        self.metrics['output_tokens'].append(req.output_length)
+
+        # Efficiency metrics
+        self.metrics['batch_size'].append(req.batch_size)
+        self.metrics['cache_hit_rate'].append(req.prefix_cache_hit)
+
+    def report(self):
+        return {
+            'ttft_p50': np.percentile(self.metrics['ttft'], 50),
+            'ttft_p99': np.percentile(self.metrics['ttft'], 99),
+            'throughput_tps': sum(self.metrics['output_tokens']) / total_time,
+            'cache_hit_rate': np.mean(self.metrics['cache_hit_rate']),
+            'avg_batch_size': np.mean(self.metrics['batch_size']),
+        }
+```
+
+### Health Checks
+
+```python
+class HealthChecker:
+    async def check_health(self):
+        checks = {
+            'gpu_memory': self.check_gpu_memory(),
+            'model_loaded': self.check_model_loaded(),
+            'latency': await self.check_latency(),
+            'queue_depth': self.check_queue_depth(),
+        }
+
+        healthy = all(checks.values())
+        return {'healthy': healthy, 'checks': checks}
+
+    def check_gpu_memory(self):
+        used = torch.cuda.memory_allocated()
+        total = torch.cuda.get_device_properties(0).total_memory
+        return used / total < 0.95  # Alert at 95%
+
+    async def check_latency(self):
+        start = time.time()
+        _ = await self.model.generate("test", max_tokens=1)
+        latency = time.time() - start
+        return latency < 0.5  # Health check should be < 500ms
+```
+
+## Cost Optimization
+
+### Token Budgeting
+
+```python
+class TokenBudget:
+    def __init__(self, daily_budget_tokens):
+        self.daily_budget = daily_budget_tokens
+        self.used_today = 0
+        self.reset_time = self.next_midnight()
+
+    def can_serve(self, estimated_tokens):
+        if time.time() > self.reset_time:
+            self.used_today = 0
+            self.reset_time = self.next_midnight()
+
+        return self.used_today + estimated_tokens <= self.daily_budget
+
+    def record_usage(self, tokens):
+        self.used_today += tokens
+
+    def estimate_request_cost(self, input_len, max_output):
+        # Pricing model
+        input_cost = input_len * 0.00001  # $0.01 per 1K input
+        output_cost = max_output * 0.00003  # $0.03 per 1K output
+        return input_cost + output_cost
+```
+
+### Model Selection
+
+Route to cheaper models when possible:
+
+```python
+class ModelRouter:
+    def __init__(self):
+        self.models = {
+            'small': {'model': 'llama-7b', 'cost': 0.001},
+            'medium': {'model': 'llama-13b', 'cost': 0.003},
+            'large': {'model': 'llama-70b', 'cost': 0.01},
+        }
+
+    def select_model(self, request):
+        """Select cheapest model that can handle request."""
+        complexity = self.estimate_complexity(request)
+
+        if complexity < 0.3:
+            return self.models['small']
+        elif complexity < 0.7:
+            return self.models['medium']
+        else:
+            return self.models['large']
+
+    def estimate_complexity(self, request):
+        """Estimate request complexity (0-1)."""
+        # Heuristics: length, keywords, domain
+        score = 0
+        if 'code' in request.lower() or 'math' in request.lower():
+            score += 0.4
+        if len(request) > 500:
+            score += 0.3
+        return min(score, 1.0)
+```
+
+## Key Takeaways
+
+1. **Prefix caching**: Amortize common prefixes across requests for 10x+ speedup.
+
+2. **Chunked prefill**: Interleave prefill and decode to avoid blocking.
+
+3. **Disaggregation**: Separate prefill (compute) from decode (memory) for cost efficiency.
+
+4. **Advanced speculation**: Medusa, EAGLE, lookahead improve on basic speculation.
+
+5. **Priority scheduling**: Not all requests are equal; schedule accordingly.
+
+6. **Multi-model**: Efficient LoRA serving and model multiplexing.
+
+7. **Observability**: Track TTFT, TPOT, throughput, cache hits for optimization.
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Implement prefix caching with a radix tree
+- Simulate chunked prefill scheduling
+- Compare speculative decoding strategies
+- Build a simple multi-model router
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/27-advanced-serving.ipynb)
+:::
+
+## Further Reading
+
+- Zheng et al. (2023). "SGLang: Efficient Execution of Structured Language Model Programs"
+- Agrawal et al. (2024). "Sarathi: Efficient LLM Inference by Piggybacking Decodes with Chunked Prefills"
+- Cai et al. (2024). "Medusa: Simple Framework for Accelerating LLM Generation with Multiple Decoding Heads"
+- Li et al. (2024). "EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty"
+- Patel et al. (2024). "Splitwise: Efficient Generative LLM Inference Using Phase Splitting"
