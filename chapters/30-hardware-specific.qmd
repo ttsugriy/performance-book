@@ -1,0 +1,545 @@
+---
+title: "Hardware-Specific Optimization"
+subtitle: "Getting Maximum Performance from Different Accelerators"
+id: sec-hardware-specific
+---
+
+---
+
+::: {.chapter-opener}
+Code that's optimal on an A100 may be suboptimal on an H100. What's fast on NVIDIA may be slow on AMD.
+
+Hardware diversity is increasing. Understanding hardware-specific optimization is essential.
+:::
+
+## The Hardware Landscape
+
+The accelerator market is more diverse than ever:
+
+```
+Major ML Accelerators (2024-2025):
+
+NVIDIA:
+  - H100 (Hopper): 80GB HBM3, 3.35 TB/s, FP8 support
+  - A100 (Ampere): 40/80GB HBM2e, 2 TB/s
+  - L4/L40: Inference-focused, lower power
+
+AMD:
+  - MI300X: 192GB HBM3, 5.3 TB/s
+  - MI250X: 128GB HBM2e, 3.2 TB/s
+
+Intel:
+  - Gaudi 2/3: HBM-based accelerators
+  - Data Center Max (Ponte Vecchio)
+
+Apple:
+  - M3 Max/Ultra: Unified memory, Metal API
+
+Google:
+  - TPU v5e/v5p: Custom ASICs, XLA-optimized
+```
+
+## NVIDIA: A100 vs H100
+
+### Architectural Differences
+
+```
+                        A100            H100
+─────────────────────────────────────────────────
+SM Count                108             132
+FP16 TFLOPS             312             989
+FP8 TFLOPS              N/A             1,979
+Memory                  80GB HBM2e      80GB HBM3
+Bandwidth               2.0 TB/s        3.35 TB/s
+NVLink                  600 GB/s        900 GB/s
+
+Key H100 additions:
+- TMA (Tensor Memory Accelerator)
+- FP8 Tensor Cores
+- Thread Block Clusters
+- Asynchronous execution barriers
+```
+
+### H100-Specific Optimizations
+
+**1. Tensor Memory Accelerator (TMA)**
+
+TMA enables asynchronous, hardware-managed memory transfers:
+
+```python
+# A100: Manual shared memory loading
+@triton.jit
+def a100_kernel(x_ptr, ...):
+    # Software orchestrates loads
+    x = tl.load(x_ptr + offsets, mask=mask)
+    # Wait for load to complete
+    # Compute...
+
+# H100: TMA handles loads automatically
+@triton.jit
+def h100_kernel(x_ptr, ...):
+    # TMA descriptor specifies transfer pattern
+    # Hardware handles async copy + synchronization
+    # Compute can overlap with loads
+```
+
+**Practical impact**: FlashAttention-3 on H100 uses TMA for 2x speedup over FA2.
+
+**2. FP8 Compute**
+
+```python
+# H100 native FP8
+import transformer_engine.pytorch as te
+
+# FP8 linear layer
+layer = te.Linear(4096, 4096)
+
+with te.fp8_autocast():
+    output = layer(input)  # Uses FP8 tensor cores
+
+# Performance:
+# FP16 on H100: 989 TFLOPS
+# FP8 on H100: 1,979 TFLOPS (2x faster)
+```
+
+**3. Thread Block Clusters**
+
+H100 groups thread blocks for better cooperation:
+
+```python
+# H100: Clusters can share data efficiently
+# Up to 16 thread blocks per cluster
+# Shared memory accessible across cluster
+
+# Practical use: Larger tile sizes in matmul
+# A100 tile: limited by single SM shared memory (164 KB)
+# H100 tile: can span multiple SMs via cluster
+```
+
+### Optimizing for Both
+
+```python
+def get_optimal_config():
+    """Select config based on GPU architecture."""
+    props = torch.cuda.get_device_properties(0)
+    compute_cap = (props.major, props.minor)
+
+    if compute_cap >= (9, 0):  # Hopper (H100)
+        return {
+            'use_fp8': True,
+            'tile_size': 256,  # Larger tiles with TMA
+            'use_flash_attention_3': True,
+        }
+    elif compute_cap >= (8, 0):  # Ampere (A100)
+        return {
+            'use_fp8': False,
+            'tile_size': 128,
+            'use_flash_attention_2': True,
+        }
+    else:
+        return {
+            'use_fp8': False,
+            'tile_size': 64,
+            'use_flash_attention_1': True,
+        }
+```
+
+## AMD MI300X
+
+### ROCm vs CUDA
+
+AMD's software stack differs from NVIDIA's:
+
+```
+CUDA Concept          →    ROCm Equivalent
+─────────────────────────────────────────────
+CUDA                       HIP
+cuBLAS                     rocBLAS
+cuDNN                      MIOpen
+NCCL                       RCCL
+Tensor Cores               Matrix Cores
+```
+
+### HIP: Write Once, Run on Both
+
+```cpp
+// HIP code runs on both AMD and NVIDIA
+
+#include <hip/hip_runtime.h>
+
+__global__ void add_kernel(float* a, float* b, float* c, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        c[idx] = a[idx] + b[idx];
+    }
+}
+
+// Compile for AMD:  hipcc -o add add.cpp
+// Compile for NVIDIA: hipcc -o add add.cpp (uses CUDA backend)
+```
+
+### PyTorch on AMD
+
+```python
+# PyTorch with ROCm
+import torch
+
+# Check for AMD GPU
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+    # Works the same as NVIDIA!
+
+# But check device name for architecture-specific opts
+props = torch.cuda.get_device_properties(0)
+if 'MI300' in props.name:
+    # AMD MI300-specific optimizations
+    pass
+```
+
+### MI300X Advantages
+
+```
+MI300X vs H100:
+
+Memory:     192 GB vs 80 GB (2.4x more!)
+Bandwidth:  5.3 TB/s vs 3.35 TB/s (1.6x more)
+FP16 TFLOPS: 1,307 vs 989 (1.3x more)
+
+Best for:
+- Large models that need memory (70B+ dense)
+- Memory-bound workloads
+- Batch inference
+```
+
+### Challenges
+
+```
+MI300X challenges:
+- Smaller software ecosystem
+- Less optimized libraries (catching up)
+- Fewer pre-built Docker images
+- FlashAttention ports may lag
+
+Mitigation:
+- Use PyTorch's vendor-agnostic APIs when possible
+- Test thoroughly on target hardware
+- Use AMD's optimized containers
+```
+
+## Apple Silicon
+
+### Unified Memory Architecture
+
+```
+Apple M3 Max/Ultra:
+
+Memory: Up to 128GB unified (CPU + GPU share)
+Bandwidth: 400 GB/s
+Neural Engine: 18 TOPS
+
+Key difference: No discrete GPU memory
+  - No CPU→GPU transfer overhead
+  - But lower raw bandwidth than HBM
+```
+
+### Metal Performance Shaders
+
+```python
+# PyTorch with MPS backend
+import torch
+
+if torch.backends.mps.is_available():
+    device = torch.device('mps')
+    model = model.to(device)
+
+# Or use MLX (Apple's native framework)
+import mlx.core as mx
+import mlx.nn as nn
+
+# MLX is designed for Apple Silicon
+x = mx.array([1, 2, 3])
+y = mx.exp(x)  # Runs on GPU automatically
+```
+
+### MLX for Native Performance
+
+```python
+# MLX: Apple's ML framework optimized for Apple Silicon
+
+import mlx.core as mx
+import mlx.nn as nn
+from mlx.utils import tree_flatten
+
+class MLP(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(in_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, out_dim)
+
+    def __call__(self, x):
+        x = mx.maximum(self.fc1(x), 0)  # ReLU
+        return self.fc2(x)
+
+# Lazy evaluation + unified memory = efficient
+model = MLP(784, 256, 10)
+x = mx.random.normal((32, 784))
+y = model(x)
+mx.eval(y)  # Actually compute
+```
+
+### Apple Silicon Best Practices
+
+```python
+# 1. Use unified memory wisely
+# No explicit transfers needed, but be mindful of memory pressure
+
+# 2. Batch appropriately
+# Lower bandwidth means smaller optimal batch sizes
+
+# 3. Use Metal-optimized operations
+# Core ML, MPS, MLX are optimized; pure Python is not
+
+# 4. Quantization helps a lot
+# Memory bandwidth is the bottleneck
+# INT4 models run faster than FP16
+```
+
+## Google TPU
+
+### TPU Architecture
+
+```
+TPU v5p:
+
+MXUs (Matrix Multiply Units): Main compute
+HBM: 95 GB per chip
+ICI (Inter-Chip Interconnect): High-speed mesh
+
+Key differences from GPU:
+- 128×128 systolic arrays (vs GPU's tensor cores)
+- Designed for matrix operations
+- XLA compilation required
+- Different memory model
+```
+
+### JAX and XLA
+
+```python
+import jax
+import jax.numpy as jnp
+from flax import linen as nn
+
+class Transformer(nn.Module):
+    @nn.compact
+    def __call__(self, x):
+        x = nn.Dense(512)(x)
+        x = nn.relu(x)
+        x = nn.Dense(512)(x)
+        return x
+
+# JIT compile with XLA
+@jax.jit
+def forward(params, x):
+    return model.apply(params, x)
+
+# Run on TPU
+x = jnp.ones((32, 128))
+y = forward(params, x)
+```
+
+### TPU Optimization Tips
+
+```python
+# 1. Batch sizes must be multiples of 8 (for 128x128 MXUs)
+batch_size = 128  # Good
+batch_size = 100  # Pad to 104 or 128
+
+# 2. Use bfloat16 (TPU native format)
+x = x.astype(jnp.bfloat16)
+
+# 3. Shard across TPU chips
+from jax.sharding import PartitionSpec as P
+
+# Model parallel across 4 chips
+sharding = jax.sharding.NamedSharding(
+    mesh=jax.sharding.Mesh(jax.devices(), ('x',)),
+    spec=P('x', None)
+)
+
+# 4. Use pjit for multi-chip parallelism
+from jax.experimental import pjit
+
+@pjit.pjit
+def train_step(params, batch):
+    ...
+```
+
+## Cross-Platform Strategies
+
+### Abstraction Layers
+
+```python
+# Strategy 1: Framework abstraction (PyTorch)
+device = torch.device('cuda' if torch.cuda.is_available()
+                      else 'mps' if torch.backends.mps.is_available()
+                      else 'cpu')
+
+# Strategy 2: Hardware detection
+def get_accelerator():
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(0)
+        if 'H100' in props.name:
+            return 'h100'
+        elif 'A100' in props.name:
+            return 'a100'
+        elif 'MI' in props.name:
+            return 'amd'
+    elif torch.backends.mps.is_available():
+        return 'apple'
+    return 'cpu'
+
+# Strategy 3: Configuration-based optimization
+HARDWARE_CONFIGS = {
+    'h100': {
+        'precision': 'fp8',
+        'batch_size': 64,
+        'use_flash_attention': 3,
+    },
+    'a100': {
+        'precision': 'bf16',
+        'batch_size': 32,
+        'use_flash_attention': 2,
+    },
+    'amd': {
+        'precision': 'bf16',
+        'batch_size': 48,
+        'use_flash_attention': 2,
+    },
+    'apple': {
+        'precision': 'fp16',
+        'batch_size': 16,
+        'use_flash_attention': False,
+    },
+}
+
+config = HARDWARE_CONFIGS[get_accelerator()]
+```
+
+### Portable Performance Code
+
+```python
+class PortableModel(nn.Module):
+    """Model that adapts to hardware."""
+
+    def __init__(self):
+        super().__init__()
+        self.accelerator = get_accelerator()
+
+        # Choose implementation based on hardware
+        if self.accelerator in ['h100', 'a100']:
+            from flash_attn import flash_attn_func
+            self.attention = flash_attn_func
+        else:
+            self.attention = self.naive_attention
+
+    def naive_attention(self, q, k, v):
+        """Fallback for non-NVIDIA hardware."""
+        scores = torch.matmul(q, k.transpose(-2, -1))
+        scores = scores / math.sqrt(k.shape[-1])
+        attn = F.softmax(scores, dim=-1)
+        return torch.matmul(attn, v)
+
+    def forward(self, x):
+        q, k, v = self.qkv_proj(x).chunk(3, dim=-1)
+        return self.attention(q, k, v)
+```
+
+## Benchmarking Across Hardware
+
+### Fair Comparisons
+
+```python
+def benchmark_hardware(model, input_shape, num_iterations=100):
+    """Benchmark with proper methodology."""
+
+    x = torch.randn(input_shape, device='cuda')
+
+    # Warmup (critical for accurate timing)
+    for _ in range(10):
+        _ = model(x)
+    torch.cuda.synchronize()
+
+    # Timed runs
+    times = []
+    for _ in range(num_iterations):
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+
+        _ = model(x)
+
+        torch.cuda.synchronize()
+        times.append(time.perf_counter() - start)
+
+    return {
+        'median_ms': np.median(times) * 1000,
+        'std_ms': np.std(times) * 1000,
+        'throughput': input_shape[0] / np.median(times),
+    }
+```
+
+### Hardware-Specific Metrics
+
+```python
+def get_hardware_metrics():
+    """Collect hardware-specific utilization."""
+
+    if torch.cuda.is_available():
+        return {
+            'gpu_util': get_gpu_utilization(),
+            'memory_used': torch.cuda.memory_allocated(),
+            'memory_bandwidth_util': measure_bandwidth_util(),
+            'tensor_core_util': get_tensor_core_util(),  # NVIDIA only
+        }
+    elif torch.backends.mps.is_available():
+        return {
+            'memory_used': torch.mps.current_allocated_memory(),
+            # MPS has fewer metrics exposed
+        }
+```
+
+## Key Takeaways
+
+1. **H100 > A100**: TMA, FP8, clusters provide 2x+ speedup on optimized code.
+
+2. **AMD is competitive**: MI300X has more memory and bandwidth; software is catching up.
+
+3. **Apple Silicon is different**: Unified memory changes optimization strategies.
+
+4. **TPU needs XLA**: Can't just port CUDA code; requires framework changes.
+
+5. **Abstract hardware differences**: Use config-based optimization, not hardcoded paths.
+
+6. **Benchmark on target**: Performance doesn't transfer across hardware.
+
+7. **Watch the ecosystem**: Hardware-specific libraries (FA3, Transformer Engine) matter.
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook lets you:
+
+- Detect and profile your hardware
+- Compare optimized vs naive implementations
+- Experiment with hardware-specific settings
+- Benchmark across configurations
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/30-hardware-specific.ipynb)
+:::
+
+## Further Reading
+
+- [NVIDIA H100 Whitepaper](https://resources.nvidia.com/en-us-tensor-core)
+- [AMD MI300X Architecture](https://www.amd.com/en/products/accelerators/instinct/mi300.html)
+- [Apple MLX Documentation](https://ml-explore.github.io/mlx/)
+- [Google TPU Research](https://cloud.google.com/tpu/docs/system-architecture)
+- [HIP Programming Guide](https://rocm.docs.amd.com/projects/HIP/)
