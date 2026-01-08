@@ -605,6 +605,253 @@ Let's trace how we derived FlashAttention:
 
 This is the investigation pattern. Not "here's FlashAttention" but "how would you find FlashAttention if it didn't exist?"
 
+## FlashAttention-3: Hopper-Specific Optimizations
+
+FlashAttention-2 was architecture-agnostic. FlashAttention-3 exploits Hopper's unique features for another 1.5-2× speedup.
+
+### The Three Innovations
+
+```
+FlashAttention-3 advances:
+
+1. TMA (Tensor Memory Accelerator)
+   - Hardware-managed async memory transfers
+   - Replaces software-orchestrated loads
+
+2. Warp Specialization
+   - Dedicated producer/consumer warps
+   - Overlaps memory and compute
+
+3. FP8 Support
+   - 2× throughput vs FP16
+   - Block-level quantization for accuracy
+```
+
+### TMA: Hardware Async Copies
+
+On Ampere (A100), software orchestrates memory transfers:
+
+```python
+# A100: Software-managed async copy
+# Step 1: Issue load
+cp.async.ca.shared.global [smem], [gmem]
+
+# Step 2: Commit group
+cp.async.commit_group
+
+# Step 3: Wait
+cp.async.wait_group 0
+
+# Software tracks addresses, handles boundaries
+```
+
+On Hopper, TMA handles this in hardware:
+
+```python
+# H100: TMA-managed copy
+# Step 1: Create TMA descriptor (once)
+tma_desc = create_tma_descriptor(
+    tensor_ptr, shape, strides, tile_shape
+)
+
+# Step 2: Issue copy (hardware manages everything)
+cp.async.bulk.tensor [smem], [tma_desc], [coords]
+
+# Step 3: Wait on barrier
+arrive.expect_tx barrier, bytes
+wait barrier
+
+# Hardware handles: addressing, boundaries, caching, coalescing
+```
+
+**Benefits:**
+- Fewer instructions (freeing registers)
+- Better memory access patterns
+- Automatic handling of edge tiles
+
+### Warp Specialization
+
+FlashAttention-2: All warps do the same work
+
+```
+Time ─→
+Warp 0: [Load Q][Load K][Compute][Load V][Compute][Store]
+Warp 1: [Load Q][Load K][Compute][Load V][Compute][Store]
+         │     │        │                 │
+         └─────┴────────┴─ Synchronization barriers ─┘
+```
+
+FlashAttention-3: Warps specialize into roles
+
+```
+Time ─→
+Producer warp:  [Load K₀][Load V₀][Load K₁][Load V₁][Load K₂]...
+                    │        │        │        │
+                    ▼        ▼        ▼        ▼
+Consumer warps: [Compute₀][Compute₀][Compute₁][Compute₁]...
+                [Store₀───][Store₀───][Store₁───]...
+
+Overlapped! Producer loads next tile while consumers compute current.
+```
+
+**Implementation concept:**
+
+```cpp
+// Warp specialization in FA3
+if (warp_id == PRODUCER_WARP) {
+    // This warp only does memory operations
+    for (int i = 0; i < num_tiles; i++) {
+        // Load next K, V tiles via TMA
+        tma_load_async(K_smem[i % 2], K_gmem + i * TILE_K);
+        tma_load_async(V_smem[i % 2], V_gmem + i * TILE_K);
+
+        // Signal consumers
+        arrive(barrier[i % 2]);
+    }
+} else {
+    // Consumer warps only compute
+    for (int i = 0; i < num_tiles; i++) {
+        // Wait for producer
+        wait(barrier[i % 2]);
+
+        // Compute attention for this tile
+        S = Q @ K_smem[i % 2].T
+        O_acc = online_softmax_update(O_acc, S, V_smem[i % 2])
+    }
+}
+```
+
+### Pingpong Scheduling
+
+The pattern above uses **pingpong buffers** (double buffering) in shared memory:
+
+```
+Shared Memory Layout:
+
+┌──────────────────────────────────────┐
+│  K buffer 0  │  V buffer 0  │        │
+├──────────────┼──────────────┤        │
+│  K buffer 1  │  V buffer 1  │  Q     │
+└──────────────┴──────────────┴────────┘
+
+Time step 0: Compute with buffer 0, load into buffer 1
+Time step 1: Compute with buffer 1, load into buffer 0
+Time step 2: Compute with buffer 0, load into buffer 1
+...
+```
+
+Memory operations and compute never contend for the same buffer.
+
+### FP8 Attention
+
+Hopper's tensor cores support FP8 for 2× the FLOPS of FP16.
+
+**The challenge:** FP8 has limited range (±448 for E4M3).
+
+**Solution:** Block-wise quantization
+
+```python
+def fp8_attention(Q, K, V):
+    # Per-block scaling factors
+    scale_Q = Q.abs().amax(dim=-1, keepdim=True) / 448.0
+    scale_K = K.abs().amax(dim=-1, keepdim=True) / 448.0
+
+    # Quantize
+    Q_fp8 = (Q / scale_Q).to(torch.float8_e4m3fn)
+    K_fp8 = (K / scale_K).to(torch.float8_e4m3fn)
+
+    # Compute in FP8 (2× faster)
+    S_fp8 = Q_fp8 @ K_fp8.T  # Tensor core MMA
+
+    # Dequantize for softmax (needs range)
+    S = S_fp8.float() * scale_Q * scale_K.T
+
+    # Softmax in FP32 for accuracy
+    P = softmax(S / sqrt(d))
+
+    # V can stay in FP16/BF16
+    return P @ V
+```
+
+**Accuracy:** Within 0.1% of FP16 attention with proper scaling.
+
+### Performance Comparison
+
+```
+FlashAttention variants on H100 (sequence length 8192, head dim 128):
+
+Version     Time (ms)   TFLOPS   % of Peak   Key Feature
+─────────────────────────────────────────────────────────────
+FA1         12.4        180      18%         Online softmax
+FA2         5.8         385      39%         Better parallelism
+FA3 FP16    3.2         700      71%         TMA + warp spec
+FA3 FP8     1.9         1,180    60% (FP8)   FP8 tensor cores
+
+Theoretical peak: 989 TFLOPS (FP16), 1979 TFLOPS (FP8)
+```
+
+### When to Use Each Version
+
+```
+FA1: Legacy systems, non-NVIDIA hardware
+FA2: A100 and earlier, production stability
+FA3: H100/H200, maximum performance
+
+Decision tree:
+├── Hardware = Hopper (H100/H200)?
+│   ├── Yes → FA3
+│   │         ├── Need FP16 accuracy? → FA3 FP16
+│   │         └── Can tolerate FP8? → FA3 FP8 (2× faster)
+│   └── No → FA2
+│             ├── Hardware = Ampere (A100)? → FA2
+│             └── Older? → FA1 or PyTorch SDPA
+```
+
+### Using FlashAttention-3
+
+```python
+# Installation
+# pip install flash-attn --no-build-isolation
+
+from flash_attn import flash_attn_func
+
+# FP16 attention
+output = flash_attn_func(
+    q, k, v,
+    causal=True,
+    softmax_scale=1.0 / math.sqrt(d)
+)
+
+# FP8 attention (Hopper only)
+from flash_attn import flash_attn_func_fp8
+
+output = flash_attn_func_fp8(
+    q.to(torch.float8_e4m3fn),
+    k.to(torch.float8_e4m3fn),
+    v,  # V can stay FP16
+    descale_q=scale_q,
+    descale_k=scale_k,
+)
+```
+
+### The Lesson: Hardware-Algorithm Co-Design
+
+FlashAttention-3 demonstrates that maximum performance requires exploiting specific hardware features:
+
+```
+Generic algorithm (FA1/FA2):
+  + Portable
+  + Easier to maintain
+  - Leaves performance on the table
+
+Hardware-specific (FA3):
+  + Maximum performance
+  - Requires Hopper
+  - More complex implementation
+```
+
+The best systems offer both: portable default, hardware-specific fast paths.
+
 ## Connections
 
 **Chapter 1 (Memory Hierarchy)**: FlashAttention is fundamentally about keeping data in fast memory (SRAM) instead of slow memory (HBM).
@@ -642,6 +889,7 @@ The accompanying notebook walks through:
 
 - Dao et al. (2022). "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
 - Dao (2023). "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning"
+- Shah et al. (2024). "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision"
 - Rabe & Staats (2021). "Self-attention Does Not Need O(n²) Memory" - Independent discovery of online softmax
 - Milakov & Gimelshein (2018). "Online normalizer calculation for softmax" - The mathematical foundation
 
