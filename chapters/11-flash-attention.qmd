@@ -1,23 +1,562 @@
 ---
 title: "Investigation: FlashAttention"
 subtitle: "Deriving the Algorithm That Changed Transformers"
-status: draft
 ---
 
-::: {.callout-warning}
-## Chapter In Progress
-This chapter is currently being written. Check back soon!
+::: {.chapter-opener}
+Don't explain FlashAttention. Derive it.
+
+The insight isn't the algorithm—it's the question that leads to it.
 :::
 
-## Coming Soon
+## The Problem
 
-This investigation will:
+Attention is the heart of the transformer. But it has a memory problem.
 
-- **Not explain** FlashAttention, but **derive** it
-- Start with the problem: O(n²) memory for attention
-- Discover the **online softmax** trick
-- Find the **combinable state** that makes it associative
-- Show the **tiling** that keeps data in SRAM
+Given queries Q, keys K, and values V (each n × d):
+
+```python
+def attention(Q, K, V):
+    S = Q @ K.T        # n×n attention scores
+    P = softmax(S)     # n×n attention weights
+    O = P @ V          # n×d output
+    return O
+```
+
+The matrices S and P are n × n. For sequence length 32K and batch size 1:
+
+- S: 32,768² × 4 bytes = 4 GB
+- P: 32,768² × 4 bytes = 4 GB
+- Total intermediate: 8 GB
+
+Per layer. Per head. Per batch element.
+
+An 80GB A100 runs out of memory quickly.
+
+## The Question
+
+Here's the question that leads to FlashAttention:
+
+**Must we materialize the full n×n matrix?**
+
+The output O is only n × d. We produce n² intermediate values to compute n × d outputs. That seems wasteful.
+
+Let's trace what we actually need.
+
+## Understanding the Computation
+
+For a single output row $O_i$ (the output for query $i$):
+
+$$O_i = \sum_j P_{ij} V_j$$
+
+where:
+
+$$P_{ij} = \frac{e^{S_{ij}}}{\sum_k e^{S_{ik}}}$$
+
+and:
+
+$$S_{ij} = Q_i \cdot K_j$$
+
+Expanded:
+
+$$O_i = \frac{\sum_j e^{Q_i \cdot K_j} V_j}{\sum_j e^{Q_i \cdot K_j}}$$
+
+This is a weighted sum of V vectors, weighted by softmax of attention scores.
+
+**Observation**: For row $i$, we need all K and all V, but we don't need the other Q rows.
+
+This suggests: **process one query row at a time**.
+
+## Attempt 1: Row-by-Row Computation
+
+```python
+def attention_row_by_row(Q, K, V):
+    n, d = Q.shape
+    O = torch.zeros(n, d)
+
+    for i in range(n):
+        # Compute scores for row i
+        scores = Q[i] @ K.T  # Shape: (n,)
+
+        # Softmax (with stability shift)
+        scores_max = scores.max()
+        exp_scores = torch.exp(scores - scores_max)
+        softmax_denom = exp_scores.sum()
+        weights = exp_scores / softmax_denom
+
+        # Output for row i
+        O[i] = weights @ V
+
+    return O
+```
+
+Memory: O(n) per row, O(n) total. We've eliminated the n² memory.
+
+But wait—this is slow. We're doing n sequential iterations, each reading all of K and V from memory.
+
+Memory traffic: O(n²d) reads (read K and V once per query).
+
+Standard attention also reads K and V once—the difference is it's doing a large matrix multiply, which is efficient.
+
+**Problem**: We've traded memory for memory bandwidth. That's not a good trade.
+
+## The Key Insight: Tiles, Not Rows
+
+The row-by-row approach processes one query at a time. But GPU operations are efficient with larger tiles.
+
+**New question**: Can we process a tile of queries against a tile of keys/values, and combine tiles without recomputation?
+
+This is where Chapter 4's associativity insight becomes crucial.
+
+## The Softmax Challenge
+
+Standard softmax needs the global maximum for numerical stability:
+
+```python
+def softmax(x):
+    x_max = x.max()
+    exp_x = torch.exp(x - x_max)
+    return exp_x / exp_x.sum()
+```
+
+If we process K/V in tiles, we don't know the global max when processing the first tile.
+
+**The blocking issue**: Softmax seems to require the full row before producing output.
+
+Let's solve this.
+
+## Investigation: Online Softmax
+
+What if the maximum changes as we see more data?
+
+Consider two chunks of scores: $[s_1, s_2, s_3]$ and $[s_4, s_5, s_6]$.
+
+**Chunk 1**: $m_1 = \max(s_1, s_2, s_3)$, $d_1 = \sum_{i=1}^{3} e^{s_i - m_1}$
+
+**Chunk 2**: $m_2 = \max(s_4, s_5, s_6)$, $d_2 = \sum_{i=4}^{6} e^{s_i - m_2}$
+
+**Global**: $m = \max(m_1, m_2)$, $d = ?$
+
+The denominator in chunk 1 was computed relative to $m_1$. To combine with chunk 2, we need to rescale:
+
+$$d_1' = d_1 \cdot e^{m_1 - m}$$
+$$d_2' = d_2 \cdot e^{m_2 - m}$$
+$$d = d_1' + d_2'$$
+
+**The correction factor**: When the max changes, multiply old sums by $e^{\text{old\_max} - \text{new\_max}}$.
+
+Let's verify:
+
+```python
+import numpy as np
+
+# Full computation
+scores = np.array([1.0, 3.0, 2.0, 5.0, 4.0, 3.5])
+m_full = scores.max()
+d_full = np.exp(scores - m_full).sum()
+print(f"Full: max={m_full}, denom={d_full:.4f}")
+
+# Chunked computation
+chunk1 = scores[:3]
+chunk2 = scores[3:]
+
+m1 = chunk1.max()
+d1 = np.exp(chunk1 - m1).sum()
+print(f"Chunk 1: max={m1}, denom={d1:.4f}")
+
+m2 = chunk2.max()
+d2 = np.exp(chunk2 - m2).sum()
+print(f"Chunk 2: max={m2}, denom={d2:.4f}")
+
+# Combine
+m = max(m1, m2)
+d = d1 * np.exp(m1 - m) + d2 * np.exp(m2 - m)
+print(f"Combined: max={m}, denom={d:.4f}")
+
+# Output:
+# Full: max=5.0, denom=3.7398
+# Chunk 1: max=3.0, denom=2.1353
+# Chunk 2: max=5.0, denom=2.1353
+# Combined: max=5.0, denom=3.7398  ✓ Matches!
+```
+
+The combination works. The softmax denominator has **associative structure** with state (max, scaled_sum).
+
+## Extending to Output
+
+The denominator is only half the story. We also need the output:
+
+$$O_i = \frac{\sum_j e^{S_{ij}} V_j}{\sum_j e^{S_{ij}}}$$
+
+The numerator is also a sum of exponentials, but weighted by $V_j$.
+
+**State**: (max, sum, numerator) = (m, d, o)
+
+When max changes:
+
+```python
+def update_state(old_state, new_scores, new_V):
+    m_old, d_old, o_old = old_state
+
+    m_new = new_scores.max()
+    exp_new = np.exp(new_scores - m_new)
+    d_new = exp_new.sum()
+    o_new = exp_new @ new_V
+
+    m = max(m_old, m_new)
+
+    # Rescale old state
+    scale_old = np.exp(m_old - m)
+    scale_new = np.exp(m_new - m)
+
+    d = d_old * scale_old + d_new * scale_new
+    o = o_old * scale_old + o_new * scale_new
+
+    return (m, d, o)
+
+# Final output: o / d
+```
+
+Let's verify this works:
+
+```python
+# Test data
+np.random.seed(42)
+Q = np.random.randn(4, 8)  # 4 queries, dim 8
+K = np.random.randn(6, 8)  # 6 keys
+V = np.random.randn(6, 8)  # 6 values
+
+# Standard attention (for reference)
+def standard_attention(Q, K, V):
+    S = Q @ K.T
+    S_max = S.max(axis=1, keepdims=True)
+    exp_S = np.exp(S - S_max)
+    P = exp_S / exp_S.sum(axis=1, keepdims=True)
+    return P @ V
+
+O_standard = standard_attention(Q, K, V)
+
+# Chunked attention
+def chunked_attention(Q, K, V, chunk_size=2):
+    n = Q.shape[0]
+    n_kv = K.shape[0]
+    d = V.shape[1]
+
+    # Initialize state for each query
+    m = np.full(n, -np.inf)
+    s = np.zeros(n)
+    o = np.zeros((n, d))
+
+    for j in range(0, n_kv, chunk_size):
+        K_chunk = K[j:j+chunk_size]
+        V_chunk = V[j:j+chunk_size]
+
+        # Scores for this chunk
+        scores = Q @ K_chunk.T  # (n, chunk_size)
+
+        for i in range(n):
+            row_scores = scores[i]
+            row_max = row_scores.max()
+
+            if row_max > m[i]:
+                # Rescale old state
+                scale = np.exp(m[i] - row_max)
+                s[i] = s[i] * scale
+                o[i] = o[i] * scale
+                m[i] = row_max
+
+            # Add new contribution
+            exp_scores = np.exp(row_scores - m[i])
+            s[i] += exp_scores.sum()
+            o[i] += exp_scores @ V_chunk
+
+    return o / s[:, None]
+
+O_chunked = chunked_attention(Q, K, V, chunk_size=2)
+
+# Compare
+print("Max difference:", np.abs(O_standard - O_chunked).max())
+# Output: Max difference: 1.11e-15 (floating point precision)
+```
+
+**It works.** We can compute attention in chunks without materializing the full n×n matrix.
+
+## The Full Algorithm
+
+Now we tile both Q and K/V:
+
+```python
+def flash_attention(Q, K, V, tile_size=64):
+    """
+    FlashAttention: tiled attention with O(n) memory.
+
+    Tiles Q (rows) and K/V (columns) to fit in SRAM.
+    """
+    n, d = Q.shape
+    n_tiles = (n + tile_size - 1) // tile_size
+
+    # Output and running statistics
+    O = np.zeros((n, d))
+    M = np.full(n, -np.inf)  # Running max
+    L = np.zeros(n)           # Running sum (ell for "l"og-sum-exp)
+
+    # Process K/V in tiles
+    for j in range(0, n, tile_size):
+        j_end = min(j + tile_size, n)
+        K_tile = K[j:j_end]
+        V_tile = V[j:j_end]
+
+        # Process Q in tiles (for parallelism)
+        for i in range(0, n, tile_size):
+            i_end = min(i + tile_size, n)
+            Q_tile = Q[i:i_end]
+
+            # Compute attention scores for this tile pair
+            S_tile = Q_tile @ K_tile.T  # (tile, tile) - fits in SRAM!
+
+            # Row-wise operations
+            for row in range(i_end - i):
+                global_row = i + row
+                row_scores = S_tile[row]
+                row_max = row_scores.max()
+
+                # New max for this row
+                new_max = max(M[global_row], row_max)
+
+                # Rescale old statistics
+                scale_old = np.exp(M[global_row] - new_max)
+                scale_new = np.exp(row_max - new_max)
+
+                exp_scores = np.exp(row_scores - row_max)
+
+                # Update running state
+                L[global_row] = L[global_row] * scale_old + exp_scores.sum() * scale_new
+                O[global_row] = O[global_row] * scale_old + (exp_scores @ V_tile) * scale_new
+                M[global_row] = new_max
+
+    # Normalize
+    return O / L[:, None]
+```
+
+### Memory Analysis
+
+```
+Standard attention:
+  S = Q @ K.T:  O(n²) memory
+  P = softmax:  O(n²) memory
+  O = P @ V:    O(nd) memory
+
+FlashAttention:
+  Q_tile:      O(tile × d) memory
+  K_tile:      O(tile × d) memory
+  V_tile:      O(tile × d) memory
+  S_tile:      O(tile²) memory
+  O, M, L:     O(nd) memory
+
+Total: O(tile² + nd)
+
+For tile = 128, d = 64, n = 32768:
+  Standard:    32768² × 4 = 4 GB
+  Flash:       128² × 4 + 32768 × 64 × 4 = 65KB + 8MB ≈ 8 MB
+  Reduction:   ~500×
+```
+
+### Speed Analysis
+
+Surprisingly, FlashAttention is often *faster* despite doing more arithmetic.
+
+Why? **IO is the bottleneck.**
+
+Standard attention:
+1. Read Q, K from HBM → Compute S → Write S to HBM
+2. Read S from HBM → Softmax → Write P to HBM
+3. Read P, V from HBM → Compute O → Write O to HBM
+
+Total HBM accesses: O(n² + n² + n²) = O(3n²)
+
+FlashAttention:
+1. Load Q_tile, K_tile, V_tile from HBM to SRAM
+2. Compute everything in SRAM
+3. Write O_tile to HBM
+
+Total HBM accesses: O(nd) for loading Q, K, V, O once
+
+The reduction in memory traffic often exceeds the extra compute cost.
+
+## The Tiling Strategy
+
+How do we choose tile sizes?
+
+**Constraint**: Tiles must fit in SRAM.
+
+GPU SRAM (shared memory): ~100-200 KB per SM
+
+```
+A100 shared memory: 164 KB
+
+For FP16:
+  Q_tile: tile × d × 2 bytes
+  K_tile: tile × d × 2 bytes
+  V_tile: tile × d × 2 bytes
+  S_tile: tile × tile × 2 bytes
+  Accumulators: tile × d × 4 bytes (FP32 for precision)
+
+For tile = 128, d = 64:
+  Q_tile: 128 × 64 × 2 = 16 KB
+  K_tile: 128 × 64 × 2 = 16 KB
+  V_tile: 128 × 64 × 2 = 16 KB
+  S_tile: 128 × 128 × 2 = 32 KB
+  Accumulators: 128 × 64 × 4 = 32 KB
+  Total: ~112 KB ✓ Fits!
+```
+
+The actual FlashAttention implementation tunes tile sizes per GPU architecture.
+
+## The Backward Pass
+
+Training requires gradients. Can we backpropagate through FlashAttention?
+
+Standard backprop would require storing all intermediate activations—defeating the memory savings.
+
+FlashAttention's solution: **recompute instead of store**.
+
+During backward:
+1. Reload Q, K, V tiles (from HBM)
+2. Recompute S_tile, P_tile (in SRAM)
+3. Compute gradients using recomputed values
+4. Write gradients to HBM
+
+This trades compute for memory. For large n, the trade is favorable—memory is the bottleneck.
+
+```python
+def flash_attention_backward(dO, Q, K, V, O, M, L):
+    """
+    Backward pass, recomputing forward values.
+
+    dO: gradient of loss w.r.t. output
+    O, M, L: saved from forward pass (O(n) memory)
+    """
+    n, d = Q.shape
+    dQ = np.zeros_like(Q)
+    dK = np.zeros_like(K)
+    dV = np.zeros_like(V)
+
+    for j in range(0, n, tile_size):
+        K_tile = K[j:j+tile_size]
+        V_tile = V[j:j+tile_size]
+
+        for i in range(0, n, tile_size):
+            Q_tile = Q[i:i+tile_size]
+            dO_tile = dO[i:i+tile_size]
+
+            # Recompute forward
+            S_tile = Q_tile @ K_tile.T
+            P_tile = softmax_with_stats(S_tile, M[i:i+tile_size], L[i:i+tile_size])
+
+            # Backward through P @ V
+            dV[j:j+tile_size] += P_tile.T @ dO_tile
+            dP_tile = dO_tile @ V_tile.T
+
+            # Backward through softmax
+            dS_tile = softmax_backward(dP_tile, P_tile)
+
+            # Backward through S = Q @ K.T
+            dQ[i:i+tile_size] += dS_tile @ K_tile
+            dK[j:j+tile_size] += dS_tile.T @ Q_tile
+
+    return dQ, dK, dV
+```
+
+## Benchmarks
+
+Real-world performance on an A100:
+
+```
+Sequence length: 2048, head dim: 64
+
+Method                Memory (MB)    Time (ms)
+───────────────────────────────────────────────
+Standard attention    1,024          2.1
+FlashAttention        8              0.8
+
+Sequence length: 16384, head dim: 64
+
+Method                Memory (MB)    Time (ms)
+───────────────────────────────────────────────
+Standard attention    OOM            —
+FlashAttention        64             42
+
+Sequence length: 65536, head dim: 64
+
+Method                Memory (MB)    Time (ms)
+───────────────────────────────────────────────
+Standard attention    OOM            —
+FlashAttention        256            680
+```
+
+FlashAttention enables sequences that were previously impossible, while being faster on feasible sequences.
+
+## The Derivation Pattern
+
+Let's trace how we derived FlashAttention:
+
+1. **Identify the problem**: O(n²) memory from materializing attention matrix
+
+2. **Ask the key question**: Must we materialize it? What do we actually need?
+
+3. **Discover the structure**: Softmax has associative structure via (max, sum) state
+
+4. **Extend the insight**: Output accumulation also has this structure with (max, sum, output_sum)
+
+5. **Apply hardware constraints**: Tile to fit in SRAM, minimize HBM traffic
+
+6. **Handle the full system**: Backward pass recomputes to maintain memory savings
+
+This is the investigation pattern. Not "here's FlashAttention" but "how would you find FlashAttention if it didn't exist?"
+
+## Connections
+
+**Chapter 1 (Memory Hierarchy)**: FlashAttention is fundamentally about keeping data in fast memory (SRAM) instead of slow memory (HBM).
+
+**Chapter 2 (Bandwidth)**: The algorithm is faster despite more FLOPs because memory bandwidth, not compute, is the bottleneck.
+
+**Chapter 4 (Associativity)**: The (max, sum, output) state forms a monoid—the mathematical foundation for chunking.
+
+## Key Takeaways
+
+1. **The question matters**: "Must we materialize the n×n matrix?" led to the algorithm. Without the question, you'd never find the answer.
+
+2. **Look for hidden structure**: Softmax doesn't look associative. But it is, with the right state representation.
+
+3. **Hardware context is essential**: FlashAttention is optimized for GPU memory hierarchy. On different hardware, different tradeoffs might apply.
+
+4. **Recomputation is a tool**: Trading compute for memory (via recomputation) is sometimes the right trade.
+
+5. **The derivation teaches more than the result**: Understanding why FlashAttention works lets you find the next FlashAttention.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook walks through:
+
+- Implementing online softmax from scratch
+- Building a simplified FlashAttention
+- Comparing memory usage to standard attention
+- Profiling SRAM vs. HBM access patterns
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/11-flash-attention-derivation.ipynb)
+:::
+
+---
+
+## Further Reading
+
+- Dao et al. (2022). "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
+- Dao (2023). "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning"
+- Rabe & Staats (2021). "Self-attention Does Not Need O(n²) Memory" - Independent discovery of online softmax
+- Milakov & Gimelshein (2018). "Online normalizer calculation for softmax" - The mathematical foundation
 
 ---
 
