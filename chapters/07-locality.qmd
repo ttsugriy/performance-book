@@ -1,0 +1,23 @@
+---
+title: "Locality"
+subtitle: "Why Nearby Data Matters"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This chapter will investigate:
+
+- **Spatial and temporal locality**
+- **Tiling** to keep working sets in cache
+- **Cache-oblivious algorithms**
+- **Data layout** and its performance implications
+
+---
+
+[**← Previous: Skipping**](06-skipping.qmd) | [**Next: The Matrix Multiply Investigation →**](10-matrix-multiply.qmd)

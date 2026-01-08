@@ -1,0 +1,65 @@
+/*-- scss:defaults --*/
+
+// Typography - clean, readable
+$font-family-sans-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+$font-family-monospace: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace;
+
+$font-size-root: 18px;
+$line-height-base: 1.7;
+
+// Colors - subtle, professional
+$primary: #2563eb;
+$link-color: $primary;
+
+/*-- scss:rules --*/
+
+// Make code blocks stand out
+pre {
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+// Emphasis on key insights
+.callout-note {
+  border-left-color: $primary;
+}
+
+// Interactive elements should be obvious
+.observable {
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+  background: #fafafa;
+}
+
+// Tables - clean and readable
+table {
+  font-size: 0.9rem;
+}
+
+th {
+  background: #f3f4f6;
+}
+
+// Chapter opening - dramatic
+.chapter-opener {
+  font-size: 1.25rem;
+  font-style: italic;
+  color: #4b5563;
+  margin-bottom: 2rem;
+  padding: 1rem;
+  border-left: 4px solid $primary;
+}
+
+// ASCII diagrams - preserve formatting
+.ascii-diagram {
+  font-family: $font-family-monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  overflow-x: auto;
+  background: #1f2937;
+  color: #f9fafb;
+  padding: 1rem;
+  border-radius: 8px;
+}

@@ -1,0 +1,23 @@
+---
+title: "The Art of Hypothesis"
+subtitle: "Finding the Bottleneck Before Optimizing"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This chapter will cover:
+
+- **Polya's first step**: understand the problem
+- **Diagnostic questions**: What is the bottleneck? What resource is constrained?
+- **The USE method**: Utilization, Saturation, Errors
+- **Following the wrong path** (and learning from it)
+
+---
+
+[**← Previous: The Art of Measurement**](20-measurement.qmd) | [**Next: The Art of Analogy →**](22-analogy.qmd)

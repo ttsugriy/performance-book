@@ -1,0 +1,24 @@
+---
+title: "The Art of Measurement"
+subtitle: "How to Know What's Actually Happening"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This chapter will cover:
+
+- **Profiling tools** and what they actually measure
+- **Statistical validity** in noisy measurements
+- **Micro vs. macro** benchmarks
+- **Avoiding the streetlight effect**
+- The **Brendan Gregg methodologies**
+
+---
+
+[**← Previous: Quantization Investigation**](13-quantization.qmd) | [**Next: The Art of Hypothesis →**](21-hypothesis.qmd)

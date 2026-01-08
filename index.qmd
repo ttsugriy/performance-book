@@ -1,0 +1,169 @@
+---
+title: "The Nature of Fast"
+subtitle: "Investigations in Computational Performance"
+---
+
+# Preface {.unnumbered}
+
+FlashAttention delivers 2-4× speedups. LoRA fine-tunes 65-billion-parameter models on a single GPU. Mixtral matches models 5× its compute budget.
+
+Ask practitioners *why* these techniques work, and you get implementation details: tiling, low-rank adapters, routing functions.
+
+But those are *how*, not *why*.
+
+The *why* is mathematical. FlashAttention works because softmax has associative structure—a property that licenses chunking. LoRA works because fine-tuning is low-rank—a property that licenses factorization. Mixtral works because different inputs need different parameters—a property that licenses conditional computation.
+
+**Properties explain optimizations.**
+
+This book is about those properties. About recognizing them. About knowing when to apply them. About developing the problem-solver's eye that sees not "here's a trick that worked" but "here's a structure that enables a class of tricks."
+
+---
+
+## What This Book Is
+
+This is not a recipe book. It won't tell you "to optimize X, do Y."
+
+This is a book about **understanding**. Each chapter is an *investigation*:
+
+1. We start with something puzzling—a phenomenon that demands explanation
+2. We form hypotheses and test them
+3. We're sometimes wrong—and the wrongness is instructive
+4. We reach understanding and extract something general
+
+The structure mirrors how performance understanding actually develops. It's messy. It's iterative. The answer isn't obvious from the start. You develop intuition by being wrong and correcting.
+
+---
+
+## The Three Pillars
+
+Performance lives at the intersection of three domains:
+
+```
+          MATHEMATICS
+              │
+              │ What structures make
+              │ computation tractable?
+              │
+              ▼
+    ┌─────────────────────┐
+    │                     │
+    │   PERFORMANCE       │
+    │                     │
+    └─────────────────────┘
+              ▲
+             ╱ ╲
+            ╱   ╲
+           ╱     ╲
+          ╱       ╲
+   HARDWARE        METHODOLOGY
+       │                │
+       │                │
+  How does the     How do we find
+  machine reward   the right
+  structure?       structure?
+```
+
+**Mathematics** provides the properties: associativity, locality, separability, sparsity. These determine what transformations are legal.
+
+**Hardware** provides the constraints: memory hierarchies, parallelism, bandwidth limits. These determine what transformations are profitable.
+
+**Methodology** provides the process: measurement, hypothesis, analogy, verification. This is how we discover which properties apply to our problem.
+
+Most performance resources cover one pillar. This book weaves all three together, because understanding requires seeing across levels.
+
+---
+
+## Who This Book Is For
+
+**Primary audience**: Engineers and researchers who work on performance-critical code, especially ML systems.
+
+**Assumed background**:
+
+- Comfortable with code (Python, C/C++, or similar)
+- Basic understanding of computer architecture (caches, cores, memory)
+- Some math (linear algebra, basic calculus)
+- Curiosity about *why* things work, not just *what* works
+
+**Not for**:
+
+- Complete beginners (need programming foundations first)
+- Readers seeking quick tips without understanding
+- Those who just want to copy-paste optimizations
+
+---
+
+## How to Read This Book
+
+The book is designed for multiple reading patterns:
+
+**Linear reading**: Parts build on each other. Part I establishes the hardware reality. Part II introduces the mathematical properties. Part III applies them in extended investigations. Part IV teaches the methodology.
+
+**Investigation hopping**: Each investigation in Part III is somewhat self-contained. If you're curious about FlashAttention specifically, you can start there—with occasional references back to earlier material.
+
+**Interactive exploration**: Many chapters include embedded visualizations and linked notebooks. The investigations come alive when you *do* them, not just read them.
+
+---
+
+## The Interactive Elements
+
+This book has three layers of interactivity:
+
+### Embedded Visualizations
+
+Interactive diagrams run directly in your browser. Adjust parameters, see effects. No installation required.
+
+### Quick Experiments (JupyterLite)
+
+Python notebooks that run entirely in your browser via WebAssembly. Good for understanding algorithms. Not suitable for performance measurement (WASM is slow).
+
+### GPU Experiments (Colab/Kaggle)
+
+Real notebooks with real GPUs. This is where you measure actual speedups. Free tier is sufficient for all examples.
+
+::: {.callout-tip}
+## A Note on Performance Numbers
+
+Cloud notebooks have variable performance. Your results may differ from the book's.
+
+Focus on **relative** speedups (2× faster) rather than **absolute** times (23ms). Relative speedups are more stable across hardware.
+
+For serious benchmarking, run locally on controlled hardware.
+:::
+
+---
+
+## The Thesis
+
+If there's one idea this book wants to convey, it's this:
+
+> **The algebra isn't abstract. It's why modern machine learning is computationally tractable at all.**
+
+FlashAttention isn't magic—it's associativity. LoRA isn't magic—it's separability. Quantization isn't magic—it's redundancy.
+
+Once you see the mathematical structure, you can derive the technique. And you can recognize when the same structure appears in a new problem, waiting to be exploited.
+
+That's the skill this book aims to develop: seeing the properties that enable performance, not just memorizing the tricks that result from them.
+
+---
+
+## Acknowledgments
+
+This book stands on the shoulders of giants:
+
+- **Alexander Stepanov** and Daniel Rose, whose *From Mathematics to Generic Programming* showed that abstract algebra explains practical programming
+- **Brendan Gregg**, whose methodologies brought rigor to systems performance
+- **George Polya**, whose *How to Solve It* taught generations how to think about problems
+- The **explorable explanations** community, for showing that interactivity enhances understanding
+- The countless researchers whose work this book attempts to explain and connect
+
+---
+
+## Let's Begin
+
+The first chapter starts with a lie—one that most of us were taught in computer science classes, one that shapes how we think about algorithms, and one that leads us astray when we try to make code fast.
+
+The lie is the Random Access Machine model.
+
+Let's investigate why it's wrong, and what to do about it.
+
+[**Chapter 1: The Lie of the RAM Model →**](chapters/01-ram-model-lie.qmd)

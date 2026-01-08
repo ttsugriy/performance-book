@@ -1,0 +1,23 @@
+---
+title: "Skipping"
+subtitle: "The Art of Not Computing"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This chapter will investigate:
+
+- **Sparsity** and why hardware struggles with it
+- **Structured sparsity** (2:4, block) that hardware can exploit
+- **Mixture of Experts** as conditional computation
+- **The tradeoff** between flexibility and efficiency
+
+---
+
+[**← Previous: Factoring**](05-factoring.qmd) | [**Next: Locality →**](07-locality.qmd)

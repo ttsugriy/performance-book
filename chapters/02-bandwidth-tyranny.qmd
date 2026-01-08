@@ -1,0 +1,344 @@
+---
+title: "The Tyranny of Bandwidth"
+subtitle: "Why Moving Data Costs More Than Computing"
+---
+
+::: {.chapter-opener}
+An H100 GPU can perform 2,000 trillion operations per second. It can move 3 trillion bytes per second from memory. That's 667 operations per byte. If your algorithm does fewer than ~100 operations per byte, you're not computing—you're waiting.
+:::
+
+## The Second Lie
+
+The previous chapter exposed the first lie: memory access is not uniform. But there's a second lie, equally pervasive:
+
+**The lie**: Performance is about doing operations faster.
+
+**The reality**: Performance is often about moving data faster.
+
+On modern hardware, computation is cheap. Communication is expensive. A floating-point multiply costs a fraction of a nanosecond. Moving the operands from memory costs tens of nanoseconds.
+
+We've built machines that can compute faster than we can feed them.
+
+## The Numbers
+
+Let's look at an NVIDIA H100 GPU:
+
+| Resource | Capacity |
+|----------|----------|
+| Peak FP16 compute | 1,979 TFLOPS |
+| Memory bandwidth | 3.35 TB/s |
+| Ratio | 590 FLOPS/byte |
+
+What does this mean? For every byte you move from memory, you need to do 590 operations to keep the compute units busy. If you do fewer, the compute units sit idle waiting for data.
+
+For comparison, here's a CPU:
+
+| Resource | Capacity (Intel Xeon, 32 cores) |
+|----------|----------|
+| Peak FP32 compute | ~3 TFLOPS |
+| Memory bandwidth | ~300 GB/s |
+| Ratio | 10 FLOPS/byte |
+
+The GPU ratio is 60× higher. GPUs are even more starved for bandwidth relative to their compute capacity.
+
+## Arithmetic Intensity: The Key Metric
+
+This leads to the most important performance metric you've probably never heard of:
+
+$$\text{Arithmetic Intensity} = \frac{\text{Operations}}{\text{Bytes Moved}}$$
+
+Arithmetic intensity tells you how much compute you're doing per byte of data movement. It's measured in FLOPS/byte (or OPS/byte for integer operations).
+
+Different operations have different intensities:
+
+| Operation | Operations | Bytes | Intensity |
+|-----------|-----------|-------|-----------|
+| Vector add (a + b → c) | n | 3n × 4 = 12n | 0.08 FLOPS/byte |
+| Dot product (a · b) | 2n | 2n × 4 = 8n | 0.25 FLOPS/byte |
+| Matrix-vector (Ax) | 2n² | n² × 4 + n × 4 ≈ 4n² | 0.5 FLOPS/byte |
+| Matrix-matrix (AB) | 2n³ | 3n² × 4 = 12n² | n/6 FLOPS/byte |
+
+Notice the pattern:
+
+- **Vector operations**: ~0.1 FLOPS/byte. Hopelessly memory-bound.
+- **Matrix-vector**: ~0.5 FLOPS/byte. Still memory-bound.
+- **Matrix-matrix**: ~n/6 FLOPS/byte. For n=1000, that's ~167 FLOPS/byte. Potentially compute-bound!
+
+**Matrix multiplication is special.** It does O(n³) operations on O(n²) data. This O(n) arithmetic intensity is why GPUs are designed around matrix multiply, why neural networks use matrix multiply everywhere, and why so much effort goes into casting other operations as matrix multiplies.
+
+## The Roofline Model
+
+The **roofline model** [@williams2009roofline] visualizes this tradeoff beautifully.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          THE ROOFLINE MODEL                                 │
+│                                                                             │
+│   Performance                                                               │
+│   (GFLOPS)                                                                  │
+│       │                                                                     │
+│       │                                                                     │
+│  1000 ┤                         ┌─────────────────── Compute ceiling       │
+│       │                        ╱                     (peak FLOPS)           │
+│       │                       ╱                                             │
+│   100 ┤                      ╱                                              │
+│       │                     ╱         Compute-bound region                  │
+│       │                    ╱          (slope = 0)                           │
+│    10 ┤                   ╱                                                 │
+│       │                  ╱  Ridge point                                     │
+│       │                 ╱   (where ceilings meet)                           │
+│     1 ┤                ╱                                                    │
+│       │               ╱                                                     │
+│       │              ╱   Memory-bound region                                │
+│   0.1 ┤             ╱    (slope = bandwidth)                                │
+│       │            ╱                                                        │
+│       │           ╱ Memory ceiling                                          │
+│       └──────────┴────────┴────────┴────────┴────────┴────────────────      │
+│               0.1       1        10       100      1000                     │
+│                     Arithmetic Intensity (FLOPS/byte)                       │
+│                                                                             │
+│   Below the ridge: memory-bound. Optimize data movement.                    │
+│   Above the ridge: compute-bound. Optimize algorithms.                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+The model has two ceilings:
+
+1. **Memory ceiling**: A diagonal line. Performance = Bandwidth × Intensity. You can't go faster than your memory can feed you.
+
+2. **Compute ceiling**: A horizontal line. Performance = Peak FLOPS. You can't compute faster than hardware allows.
+
+The **ridge point** is where these meet:
+
+$$\text{Ridge Intensity} = \frac{\text{Peak FLOPS}}{\text{Bandwidth}}$$
+
+For an H100: 1979 TFLOPS / 3.35 TB/s ≈ 590 FLOPS/byte.
+
+For operations with intensity below 590: you're memory-bound. Move data faster.
+
+For operations with intensity above 590: you're compute-bound. Use better algorithms.
+
+## The Investigation: Where Does Attention Live?
+
+Let's apply this to a real example: the attention mechanism in transformers.
+
+Standard attention computes:
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right) V$$
+
+For sequence length n and head dimension d:
+
+**Operations**:
+- QK^T: 2n²d FLOPs
+- Softmax: ~5n² FLOPs (exp, sum, divide)
+- Multiply by V: 2n²d FLOPs
+
+Total: ~4n²d FLOPs
+
+**Bytes moved** (naive implementation):
+- Read Q, K, V: 3nd × 2 bytes (FP16)
+- Write attention matrix: n² × 2 bytes
+- Read attention matrix: n² × 2 bytes
+- Write output: nd × 2 bytes
+
+Total: ~6nd + 4n² bytes
+
+**Arithmetic intensity**:
+
+$$I = \frac{4n^2 d}{6nd + 4n^2} = \frac{4nd}{6d + 4n}$$
+
+For n=2048, d=64:
+
+$$I = \frac{4 \times 2048 \times 64}{6 \times 64 + 4 \times 2048} = \frac{524,288}{8,576} \approx 61 \text{ FLOPS/byte}$$
+
+That's well below the H100's ridge point of 590. **Attention is memory-bound.**
+
+Now here's the key insight: most of those bytes are the **attention matrix** (4n² bytes). If we could avoid materializing it—compute softmax incrementally, never storing the full n² matrix—we'd dramatically reduce data movement.
+
+This is exactly what FlashAttention does. We'll investigate how in a later chapter.
+
+## Memory-Bound vs Compute-Bound: Different Strategies
+
+The roofline tells you not just *where* you are, but *what to optimize*.
+
+### If Memory-Bound (Below the Ridge)
+
+Your problem: data movement. Your solutions:
+
+1. **Move less data**: Quantization (FP16 → INT8 halves bytes), sparsity (skip zeros), compression
+2. **Reuse data more**: Tiling, blocking, caching intermediate results
+3. **Fuse operations**: Combine kernels to avoid writing intermediates to memory
+4. **Improve access patterns**: Sequential over random, coalesced over scattered
+
+### If Compute-Bound (Above the Ridge)
+
+Your problem: algorithm efficiency. Your solutions:
+
+1. **Better algorithms**: FFT instead of naive convolution, Strassen's for matrix multiply
+2. **Better hardware utilization**: Tensor cores, vectorization, parallelization
+3. **Reduced precision**: FP16 gives 2× throughput, INT8 gives 4×
+4. **Approximation**: When exact isn't necessary, approximate
+
+## The Transition: How Bottlenecks Shift
+
+The same operation can be memory-bound or compute-bound depending on parameters.
+
+Matrix multiply intensity is n/6 (for square n×n matrices). Let's trace how it behaves:
+
+| Matrix size (n) | Intensity | H100 bottleneck |
+|-----------------|-----------|-----------------|
+| 32 | 5.3 | Memory-bound |
+| 64 | 10.7 | Memory-bound |
+| 256 | 42.7 | Memory-bound |
+| 1024 | 170.7 | Memory-bound |
+| 4096 | 682.7 | Compute-bound! |
+
+Only at n ≈ 3500 does matrix multiply cross the ridge and become compute-bound on an H100.
+
+This has practical implications:
+
+- **Batch size matters**: Larger batches → larger matrices → higher intensity → closer to compute-bound
+- **Model size matters**: Larger hidden dimensions → better hardware utilization
+- **Sequence length matters**: For attention, longer sequences can shift the bottleneck
+
+When practitioners say "increase batch size for better GPU utilization," this is why. They're increasing arithmetic intensity to cross the ridge.
+
+## The Investigation: Measuring the Regime
+
+How do you know which regime you're in? Measure.
+
+```python
+import torch
+import time
+
+def benchmark_matmul(n, dtype=torch.float16, device='cuda'):
+    """Benchmark matrix multiply at different sizes."""
+    a = torch.randn(n, n, dtype=dtype, device=device)
+    b = torch.randn(n, n, dtype=dtype, device=device)
+
+    # Warmup
+    for _ in range(10):
+        c = a @ b
+    torch.cuda.synchronize()
+
+    # Measure
+    start = time.perf_counter()
+    iterations = 100
+    for _ in range(iterations):
+        c = a @ b
+    torch.cuda.synchronize()
+    elapsed = time.perf_counter() - start
+
+    # Calculate metrics
+    ops = 2 * n**3 * iterations  # multiply-add = 2 ops
+    bytes_moved = 3 * n**2 * 2 * iterations  # 3 matrices, 2 bytes each (FP16)
+
+    flops = ops / elapsed / 1e12  # TFLOPS
+    intensity = ops / bytes_moved  # FLOPS/byte
+    bandwidth_used = bytes_moved / elapsed / 1e9  # GB/s
+
+    return {
+        'n': n,
+        'tflops': flops,
+        'intensity': intensity,
+        'bandwidth_gb_s': bandwidth_used,
+    }
+
+# Measure across sizes
+for n in [64, 256, 1024, 4096, 8192]:
+    result = benchmark_matmul(n)
+    print(f"n={result['n']:5d}: {result['tflops']:6.1f} TFLOPS, "
+          f"intensity={result['intensity']:5.1f}, "
+          f"BW={result['bandwidth_gb_s']:6.1f} GB/s")
+```
+
+**What to look for**:
+
+- If TFLOPS increases with problem size: you were memory-bound, now using compute better
+- If bandwidth stays near peak but TFLOPS is low: memory-bound
+- If TFLOPS stays near peak and bandwidth drops: compute-bound
+
+## The Meta-Lesson: Measure the Bottleneck
+
+Before optimizing, identify the bottleneck. This seems obvious, but it's often skipped.
+
+The roofline model gives you a framework:
+
+1. **Calculate intensity** for your operation
+2. **Compare to ridge point** of your hardware
+3. **Optimize the right thing**: data movement if below, computation if above
+
+Many performance improvements fail because they optimize the wrong thing. Making memory-bound code compute faster is useless—you're not compute-limited. Making compute-bound code use less memory is equally futile.
+
+Know your bottleneck. Then attack it.
+
+---
+
+::: {.callout-note}
+## Interactive: The Roofline Explorer
+
+Try the interactive roofline model below. Adjust arithmetic intensity and see where different operations land.
+
+```{ojs}
+//| echo: false
+viewof intensity = Inputs.range([0.1, 1000], {
+  value: 10,
+  step: 0.1,
+  label: "Arithmetic Intensity (FLOPS/byte)",
+  transform: Math.log
+})
+
+viewof peak_flops = Inputs.range([1, 2000], {
+  value: 1000,
+  step: 10,
+  label: "Peak Compute (TFLOPS)"
+})
+
+viewof bandwidth = Inputs.range([100, 5000], {
+  value: 3000,
+  step: 100,
+  label: "Memory Bandwidth (GB/s)"
+})
+
+ridge_point = peak_flops * 1000 / bandwidth
+
+achieved = Math.min(peak_flops, bandwidth * intensity / 1000)
+
+html`
+<div style="font-family: monospace; padding: 1rem; background: #f5f5f5; border-radius: 8px;">
+  <div><strong>Ridge Point:</strong> ${ridge_point.toFixed(1)} FLOPS/byte</div>
+  <div><strong>Your Intensity:</strong> ${intensity.toFixed(1)} FLOPS/byte</div>
+  <div><strong>Achieved Performance:</strong> ${achieved.toFixed(1)} TFLOPS</div>
+  <div><strong>Regime:</strong> ${intensity < ridge_point ? "🔴 Memory-Bound (optimize data movement)" : "🟢 Compute-Bound (optimize algorithms)"}</div>
+  <div><strong>Efficiency:</strong> ${(achieved / peak_flops * 100).toFixed(1)}% of peak</div>
+</div>
+`
+```
+:::
+
+---
+
+## Key Takeaways
+
+1. **Computation is cheap. Communication is expensive.** Modern hardware can compute far faster than it can move data.
+
+2. **Arithmetic intensity** is the key metric: operations per byte moved. It determines whether you're memory-bound or compute-bound.
+
+3. **The roofline model** visualizes the tradeoff. Below the ridge: optimize data movement. Above the ridge: optimize algorithms.
+
+4. **Matrix multiply is special.** It has O(n) intensity, which is why neural networks are designed around it.
+
+5. **Know your bottleneck before optimizing.** Measure intensity, compare to hardware ridge point, then attack the right thing.
+
+---
+
+## Further Reading
+
+- Williams et al., ["Roofline: An Insightful Visual Performance Model"](https://people.eecs.berkeley.edu/~kubitron/cs252/handouts/papers/RooflineVyNoYellow.pdf) — The original paper
+- NVIDIA, [CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/) — Memory optimization for GPUs
+- Intel, [Advisor Roofline Analysis](https://www.intel.com/content/www/us/en/developer/articles/guide/intel-advisor-roofline.html) — Tool for automatic roofline analysis
+
+---
+
+[**← Previous: The Lie of the RAM Model**](01-ram-model-lie.qmd) | [**Next: The Parallel Trap →**](03-parallel-trap.qmd)

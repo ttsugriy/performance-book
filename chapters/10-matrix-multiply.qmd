@@ -1,0 +1,24 @@
+---
+title: "Investigation: Matrix Multiply"
+subtitle: "Why This Operation Rules Modern Computing"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This investigation will:
+
+- Start with **two implementations** that differ by 200×
+- **Profile** to understand the bottleneck
+- Discover the **tiling** insight
+- Connect to the **roofline model**
+- Explain why **neural networks are designed around GEMM**
+
+---
+
+[**← Previous: Locality**](07-locality.qmd) | [**Next: FlashAttention Investigation →**](11-flash-attention.qmd)

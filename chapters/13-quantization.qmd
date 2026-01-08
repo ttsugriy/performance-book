@@ -1,0 +1,24 @@
+---
+title: "Investigation: Quantization"
+subtitle: "Why 4 Bits Can Do the Work of 32"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This investigation will:
+
+- Start with the paradox: throwing away 75% of precision works
+- Understand **why neural networks tolerate quantization**
+- Explore the **outlier problem** in LLMs
+- Learn about **GPTQ, AWQ**, and modern techniques
+- Connect to **hardware**: INT8 tensor cores
+
+---
+
+[**← Previous: LoRA Investigation**](12-lora.qmd) | [**Next: The Art of Measurement →**](20-measurement.qmd)

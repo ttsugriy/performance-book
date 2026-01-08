@@ -1,0 +1,23 @@
+---
+title: "Chunking"
+subtitle: "How Associativity Enables Parallelism and Streaming"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This chapter will investigate:
+
+- **Associativity** as a mathematical property
+- **Why FlashAttention works** (the softmax insight)
+- **Streaming algorithms** that process data incrementally
+- **Finding combinable state** for seemingly sequential operations
+
+---
+
+[**← Previous: The Parallel Trap**](03-parallel-trap.qmd) | [**Next: Factoring →**](05-factoring.qmd)

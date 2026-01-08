@@ -1,0 +1,328 @@
+---
+title: "The Lie of the RAM Model"
+subtitle: "Why Everything You Learned About Memory Is Wrong"
+---
+
+::: {.chapter-opener}
+In 1950, John von Neumann described a computer architecture where memory is uniform. Every address takes the same time to access. Every byte is equally close to the processor. The Random Access Machine (RAM) model was born.
+
+Seventy years later, we still teach it. And we still pretend it's true.
+
+It's not.
+:::
+
+## The Lie
+
+Computer science education teaches a beautiful abstraction: the **Random Access Machine**. In this model:
+
+- Memory is a flat array of cells
+- Accessing any cell takes constant time: O(1)
+- All memory operations are equivalent
+
+This abstraction is elegant. It's simple. It lets us analyze algorithms without getting lost in hardware details.
+
+And on modern machines, it's a dangerous lie.
+
+## The Reality
+
+On my laptop, here's what memory access actually costs:
+
+| Location | Latency | Relative to Register |
+|----------|---------|---------------------|
+| Register | ~0.5 ns | 1× |
+| L1 Cache | ~1 ns | 2× |
+| L2 Cache | ~4 ns | 8× |
+| L3 Cache | ~12 ns | 24× |
+| DRAM | ~100 ns | 200× |
+| SSD | ~100,000 ns | 200,000× |
+
+That's **five orders of magnitude** from fastest to slowest. The difference between register access and SSD access is the same as the difference between one second and one day.
+
+The RAM model says these are all "O(1)." The machine disagrees.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        THE MEMORY HIERARCHY                                 │
+│                                                                             │
+│    ┌─────────┐                                                              │
+│    │Registers│  ~0.5 ns    Fastest, smallest (~1 KB)                       │
+│    │ (1 KB)  │             Compiler-managed                                │
+│    └────┬────┘                                                              │
+│         │                                                                   │
+│    ┌────▼────┐                                                              │
+│    │L1 Cache │  ~1 ns      Per-core, split I/D (~64 KB)                    │
+│    │ (64 KB) │             Hardware-managed                                │
+│    └────┬────┘                                                              │
+│         │                                                                   │
+│    ┌────▼────┐                                                              │
+│    │L2 Cache │  ~4 ns      Per-core (~256 KB - 1 MB)                       │
+│    │(256 KB) │             Hardware-managed                                │
+│    └────┬────┘                                                              │
+│         │                                                                   │
+│    ┌────▼────┐                                                              │
+│    │L3 Cache │  ~12 ns     Shared across cores (~32 MB)                    │
+│    │ (32 MB) │             Hardware-managed                                │
+│    └────┬────┘                                                              │
+│         │                                                                   │
+│    ┌────▼────┐                                                              │
+│    │  DRAM   │  ~100 ns    Main memory (~16-256 GB)                        │
+│    │ (32 GB) │             OS-managed                                      │
+│    └────┬────┘                                                              │
+│         │                                                                   │
+│    ┌────▼────┐                                                              │
+│    │  SSD    │  ~100 μs    Persistent storage (~1-8 TB)                    │
+│    │ (1 TB)  │             OS/filesystem-managed                           │
+│    └─────────┘                                                              │
+│                                                                             │
+│    Each level: ~10× slower, ~10× larger                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Why the Hierarchy Exists
+
+The memory hierarchy isn't an accident. It's a response to a fundamental physical constraint: **the speed of light**.
+
+In one nanosecond, light travels about 30 centimeters. Electricity in copper moves slower—roughly 20 cm/ns. A round-trip to DRAM requires physical distance that simply cannot be covered in the time a fast operation completes.
+
+Additionally, there's a fundamental tradeoff between **speed** and **capacity**:
+
+- Fast memory requires expensive, power-hungry circuitry (SRAM)
+- Large memory requires dense, cheap circuitry (DRAM)
+- You can't have both: physics won't allow it
+
+The hierarchy is the engineering compromise. Keep frequently-used data close (fast, small). Push infrequently-used data far (slow, large).
+
+## The Investigation: Sequential vs. Random Access
+
+Let's make this concrete with an investigation.
+
+**The setup**: We have an array of 100 million integers. We want to sum them.
+
+**Implementation 1**: Sequential access
+
+```python
+def sum_sequential(arr):
+    total = 0
+    for i in range(len(arr)):
+        total += arr[i]  # Access arr[0], arr[1], arr[2], ...
+    return total
+```
+
+**Implementation 2**: Random access
+
+```python
+import random
+
+def sum_random(arr, indices):
+    total = 0
+    for i in indices:  # Random order
+        total += arr[i]
+    return total
+
+# indices is a random permutation of [0, 1, 2, ..., n-1]
+```
+
+Both do the same arithmetic. Both access the same elements. Both are O(n).
+
+**The prediction (RAM model)**: Same performance.
+
+**The reality**: Let's measure.
+
+```python
+import numpy as np
+import time
+
+n = 100_000_000
+arr = np.arange(n, dtype=np.int64)
+indices = np.random.permutation(n)
+
+# Sequential
+start = time.perf_counter()
+total_seq = arr.sum()  # NumPy uses sequential access internally
+time_seq = time.perf_counter() - start
+
+# Random
+start = time.perf_counter()
+total_rand = arr[indices].sum()  # Forces random access pattern
+time_rand = time.perf_counter() - start
+
+print(f"Sequential: {time_seq:.3f}s")
+print(f"Random:     {time_rand:.3f}s")
+print(f"Ratio:      {time_rand/time_seq:.1f}×")
+```
+
+On my machine, the results:
+
+```
+Sequential: 0.05s
+Random:     0.89s
+Ratio:      17.8×
+```
+
+**Same algorithm. Same elements. 18× slower.**
+
+The RAM model has no explanation for this. The memory hierarchy does.
+
+## Why Sequential Access Wins
+
+When you access `arr[0]`, the CPU doesn't just fetch that one element. It fetches an entire **cache line**—typically 64 bytes.
+
+For 8-byte integers, that's 8 elements. So when you access `arr[0]`, you get `arr[0]` through `arr[7]` for free.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        CACHE LINE FETCHING                                  │
+│                                                                             │
+│   Request: arr[0]                                                           │
+│                                                                             │
+│   What happens:                                                             │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ Memory │ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ 8 │ 9 │ ...              │   │
+│   └────────┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴──────────────────┘   │
+│              └───────────────────────────────┘                              │
+│                   Entire cache line fetched                                 │
+│                       (64 bytes = 8 int64s)                                 │
+│                                                                             │
+│   Sequential access:                                                        │
+│   - Request arr[0] → fetch arr[0:8] → MISS                                 │
+│   - Request arr[1] → already in cache → HIT                                │
+│   - Request arr[2] → already in cache → HIT                                │
+│   - ...                                                                     │
+│   - Request arr[7] → already in cache → HIT                                │
+│   - Request arr[8] → fetch arr[8:16] → MISS                                │
+│                                                                             │
+│   Hit rate: 7/8 = 87.5%                                                    │
+│                                                                             │
+│   Random access:                                                            │
+│   - Request arr[47382] → fetch line → MISS                                 │
+│   - Request arr[91024] → different line → MISS                             │
+│   - Request arr[3847]  → different line → MISS                             │
+│   - ...                                                                     │
+│                                                                             │
+│   Hit rate: ~0% (each access to a different line)                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Sequential access**: 87.5% cache hit rate. Most accesses are free.
+
+**Random access**: ~0% cache hit rate. Every access pays the full DRAM latency.
+
+The 18× slowdown is the cost of cache misses.
+
+## The Prefetcher: Hardware Helping You
+
+Modern CPUs have **prefetchers**—hardware that predicts future accesses and loads data before you ask.
+
+For sequential access, the pattern is obvious: if you accessed addresses 0, 64, 128, the prefetcher guesses you'll want 192 next. It starts the DRAM fetch in advance, hiding the latency.
+
+For random access, there's no pattern to predict. The prefetcher is useless. Every access stalls waiting for DRAM.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           PREFETCHING                                       │
+│                                                                             │
+│   SEQUENTIAL ACCESS:                                                        │
+│   Time →                                                                    │
+│   ├──────┼──────┼──────┼──────┼──────┼──────┤                              │
+│   │Fetch │Fetch │Fetch │Fetch │Fetch │Fetch │                              │
+│   │Line 0│Line 1│Line 2│Line 3│Line 4│Line 5│                              │
+│   └──────┴──────┴──────┴──────┴──────┴──────┘                              │
+│   ├──────┼──────┼──────┼──────┼──────┼──────┤                              │
+│   │Use   │Use   │Use   │Use   │Use   │Use   │                              │
+│   │Line 0│Line 1│Line 2│Line 3│Line 4│Line 5│                              │
+│   └──────┴──────┴──────┴──────┴──────┴──────┘                              │
+│                                                                             │
+│   Prefetcher fetches ahead. Use and fetch overlap. No stalls.              │
+│                                                                             │
+│   RANDOM ACCESS:                                                            │
+│   Time →                                                                    │
+│   ├──────┼─┼──────┼─┼──────┼─┼──────┼─┤                                    │
+│   │Fetch │U│Fetch │U│Fetch │U│Fetch │U│                                    │
+│   │Line A│ │Line B│ │Line C│ │Line D│ │                                    │
+│   └──────┴─┴──────┴─┴──────┴─┴──────┴─┘                                    │
+│            ↑        ↑        ↑        ↑                                     │
+│          Stall    Stall    Stall    Stall                                   │
+│                                                                             │
+│   Prefetcher can't predict. CPU stalls waiting for each fetch.             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## The Deeper Lesson: Locality
+
+The memory hierarchy rewards a property called **locality**:
+
+**Temporal locality**: If you access an address, you'll likely access it again soon. Keep it in cache.
+
+**Spatial locality**: If you access an address, you'll likely access nearby addresses soon. Fetch them together.
+
+Sequential array access has perfect spatial locality. Random access has none.
+
+This insight generalizes far beyond array traversal:
+
+- **Matrix multiplication** can be tiled to keep working sets in cache
+- **Tree traversals** can be cache-oblivious with careful layout
+- **Hash tables** have poor locality (random access by design)—but can be improved with better hashing
+- **Linked lists** have terrible locality (nodes scattered in memory)—this is why arrays usually beat them
+
+**The pattern**: Algorithms that respect locality beat algorithms that don't, even if the RAM model says they're equivalent.
+
+## What This Means for You
+
+The RAM model isn't useless—it's a useful first approximation. But for performance-critical code, you need to see deeper.
+
+When analyzing an algorithm, ask:
+
+1. **What's the access pattern?** Sequential? Strided? Random?
+2. **What's the working set size?** Does it fit in L1? L2? L3?
+3. **Can I restructure to improve locality?** Tiling? Layout changes? Blocking?
+
+The answers to these questions often matter more than asymptotic complexity. An O(n²) algorithm with good locality can beat an O(n log n) algorithm with poor locality for practical n.
+
+## Looking Ahead
+
+The memory hierarchy is just the first crack in the RAM model. The next chapter investigates another: the illusion that computation is the bottleneck.
+
+On modern hardware, **moving data costs more than computing on it**. This leads to a different way of thinking about performance—one measured not in FLOPS, but in bytes.
+
+---
+
+::: {.callout-note}
+## Try It Yourself
+
+The notebook for this chapter lets you:
+
+- Measure sequential vs. random access on your machine
+- Visualize cache miss rates with different access patterns
+- Explore how working set size affects performance
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/01-memory-hierarchy.ipynb)
+:::
+
+---
+
+## Key Takeaways
+
+1. **The RAM model is a lie.** Memory access time varies by 200× depending on where data lives.
+
+2. **The memory hierarchy exists because of physics.** Fast memory is small. Large memory is slow. You can't have both.
+
+3. **Sequential access beats random access.** By 10-20× on typical hardware, due to caching and prefetching.
+
+4. **Locality is the property that matters.** Temporal locality (reuse data) and spatial locality (access neighbors) are rewarded by hardware.
+
+5. **Access pattern often matters more than algorithm.** An O(n²) algorithm with good locality can beat O(n log n) with poor locality.
+
+---
+
+## Further Reading
+
+- Patterson & Hennessy, *Computer Architecture: A Quantitative Approach* — The definitive reference on memory hierarchies
+- Ulrich Drepper, ["What Every Programmer Should Know About Memory"](https://people.freebsd.org/~lstewart/articles/cpumemory.pdf) — Deep dive into memory systems
+- Agner Fog, [Optimization Manuals](https://www.agner.org/optimize/) — Practical low-level optimization guidance
+
+---
+
+[**Next: The Tyranny of Bandwidth →**](02-bandwidth-tyranny.qmd)

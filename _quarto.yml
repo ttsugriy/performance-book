@@ -1,0 +1,61 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "The Nature of Fast"
+  subtitle: "Investigations in Computational Performance"
+  author: "Taras Tsugrii"
+  date: today
+  repo-url: https://github.com/ttsugriy/performance-book
+  repo-actions: [edit, issue]
+  sharing: [twitter, linkedin]
+
+  chapters:
+    - index.qmd
+    - part: "Part I: The Physics of Computation"
+      chapters:
+        - chapters/01-ram-model-lie.qmd
+        - chapters/02-bandwidth-tyranny.qmd
+        - chapters/03-parallel-trap.qmd
+    - part: "Part II: The Algebra of Efficiency"
+      chapters:
+        - chapters/04-chunking.qmd
+        - chapters/05-factoring.qmd
+        - chapters/06-skipping.qmd
+        - chapters/07-locality.qmd
+    - part: "Part III: The Investigations"
+      chapters:
+        - chapters/10-matrix-multiply.qmd
+        - chapters/11-flash-attention.qmd
+        - chapters/12-lora.qmd
+        - chapters/13-quantization.qmd
+    - part: "Part IV: The Method"
+      chapters:
+        - chapters/20-measurement.qmd
+        - chapters/21-hypothesis.qmd
+        - chapters/22-analogy.qmd
+
+format:
+  html:
+    theme:
+      light: [cosmo, custom.scss]
+      dark: [darkly, custom.scss]
+    code-copy: true
+    code-fold: false
+    code-tools: true
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    highlight-style: github
+    fig-responsive: true
+
+execute:
+  freeze: auto
+  cache: true
+
+bibliography: references.bib
+csl: ieee.csl
+
+# For Observable JS interactives
+ojs: true

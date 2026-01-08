@@ -1,0 +1,54 @@
+# Quarto
+_site/
+_book/
+.quarto/
+*.html
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+.venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+.jupyter/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Results (large files)
+results/*.pt
+results/*.pkl
+results/*.npy
+!results/.reference/
+
+# Credentials (never commit)
+.env
+*.key
+credentials.json

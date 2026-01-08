@@ -1,0 +1,23 @@
+---
+title: "The Parallel Trap"
+subtitle: "Why More Cores Don't Always Mean More Speed"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This chapter will investigate:
+
+- **Amdahl's Law** and why it's optimistic
+- **Coordination costs** that grow with parallelism
+- **Contention** for shared resources
+- **When parallelism helps** vs. when it hurts
+
+---
+
+[**← Previous: The Tyranny of Bandwidth**](02-bandwidth-tyranny.qmd) | [**Next: Chunking →**](04-chunking.qmd)

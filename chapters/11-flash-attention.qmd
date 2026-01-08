@@ -1,0 +1,24 @@
+---
+title: "Investigation: FlashAttention"
+subtitle: "Deriving the Algorithm That Changed Transformers"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This investigation will:
+
+- **Not explain** FlashAttention, but **derive** it
+- Start with the problem: O(n²) memory for attention
+- Discover the **online softmax** trick
+- Find the **combinable state** that makes it associative
+- Show the **tiling** that keeps data in SRAM
+
+---
+
+[**← Previous: Matrix Multiply Investigation**](10-matrix-multiply.qmd) | [**Next: LoRA Investigation →**](12-lora.qmd)

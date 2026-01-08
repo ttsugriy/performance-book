@@ -1,0 +1,23 @@
+---
+title: "The Art of Analogy"
+subtitle: "Finding Related Problems That Have Been Solved"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This chapter will cover:
+
+- **Polya's key heuristic**: "Do you know a related problem?"
+- **Cross-domain transfer**: memory allocators → ID generation
+- **The pattern library**: recurring structures in performance
+- **When analogies fail** (and how to know)
+
+---
+
+[**← Previous: The Art of Hypothesis**](21-hypothesis.qmd)

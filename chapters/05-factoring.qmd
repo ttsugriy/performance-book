@@ -1,0 +1,23 @@
+---
+title: "Factoring"
+subtitle: "When Big Computations Decompose Into Small Ones"
+status: draft
+---
+
+::: {.callout-warning}
+## Chapter In Progress
+This chapter is currently being written. Check back soon!
+:::
+
+## Coming Soon
+
+This chapter will investigate:
+
+- **Separability** and low-rank structure
+- **Depthwise separable convolutions** in MobileNet
+- **LoRA** and the intrinsic dimensionality of fine-tuning
+- **SVD** as the optimal factorization
+
+---
+
+[**← Previous: Chunking**](04-chunking.qmd) | [**Next: Skipping →**](06-skipping.qmd)
