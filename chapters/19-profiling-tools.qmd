@@ -4,6 +4,8 @@ subtitle: "Mastering the Art of Measurement"
 id: sec-profiling-tools
 ---
 
+---
+
 ::: {.chapter-opener}
 You can't optimize what you can't measure. But most engineers use profilers wrong.
 
@@ -625,4 +627,3 @@ By week 5, you'll be profiling like a pro.
 - Nsight documentation: https://developer.nvidia.com/nsight-systems
 - PyTorch profiler tutorial: https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html
 
----

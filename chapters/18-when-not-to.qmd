@@ -2,6 +2,8 @@
 title: "When Not to Optimize"
 subtitle: "The Art of Knowing When to Stop"
 id: sec-when-not-to
+---
+
 ::: {.chapter-opener}
 "Premature optimization is the root of all evil." — Donald Knuth
 

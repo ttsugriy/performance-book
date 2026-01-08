@@ -1,6 +1,8 @@
 ---
 title: "Investigation: LoRA"
 subtitle: "The Low-Rank Structure of Fine-Tuning"
+---
+
 ::: {.chapter-opener}
 GPT-3 has 175 billion parameters. Fine-tuning them requires 700+ GB of memory.
 

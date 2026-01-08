@@ -1,6 +1,8 @@
 ---
 title: "Investigation: Matrix Multiply"
 subtitle: "Why This Operation Rules Modern Computing"
+---
+
 ::: {.chapter-opener}
 Two matrix multiply implementations. Same algorithm. Same hardware. Same inputs.
 

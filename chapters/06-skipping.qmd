@@ -1,6 +1,8 @@
 ---
 title: "Skipping"
 subtitle: "The Art of Not Computing"
+---
+
 ::: {.chapter-opener}
 The most powerful optimization: don't do the work at all.
 

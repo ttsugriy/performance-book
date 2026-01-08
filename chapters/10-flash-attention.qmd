@@ -1,6 +1,8 @@
 ---
 title: "Investigation: FlashAttention"
 subtitle: "Deriving the Algorithm That Changed Transformers"
+---
+
 ::: {.chapter-opener}
 Don't explain FlashAttention. Derive it.
 

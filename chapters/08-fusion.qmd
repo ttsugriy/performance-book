@@ -2,6 +2,8 @@
 title: "Fusion"
 subtitle: "When Combining Operations Beats Separating Them"
 id: sec-fusion
+---
+
 ::: {.chapter-opener}
 Every memory round-trip has a cost. If you write to memory just to read it back, you've paid twice for nothing.
 

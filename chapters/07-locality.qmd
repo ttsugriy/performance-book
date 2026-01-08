@@ -1,6 +1,8 @@
 ---
 title: "Locality"
 subtitle: "Why Nearby Data Matters"
+---
+
 ::: {.chapter-opener}
 You've learned three algebraic properties that enable efficiency: associativity (chunking), separability (factoring), and sparsity (skipping).
 

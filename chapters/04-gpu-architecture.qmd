@@ -1,0 +1,647 @@
+---
+title: "GPU Architecture and Programming Model"
+subtitle: "Understanding the Machine That Powers Modern ML"
+id: sec-gpu-architecture
+---
+
+---
+
+::: {.chapter-opener}
+CPUs are designed for latency: finish one task as fast as possible. GPUs are designed for throughput: finish as many tasks as possible.
+
+This fundamental difference shapes everything about GPU programming—and everything about modern ML performance.
+:::
+
+## Why GPUs?
+
+An NVIDIA A100 GPU delivers:
+- 19.5 TFLOPS (FP32)
+- 312 TFLOPS (FP16 with tensor cores)
+- 1,555 GB/s memory bandwidth
+
+A modern CPU (Intel Xeon Platinum) delivers:
+- ~2 TFLOPS (FP32)
+- ~200 GB/s memory bandwidth
+
+**The GPU is 100-150× faster for dense linear algebra.**
+
+But this performance comes with constraints. Understanding GPU architecture is essential for writing fast code.
+
+## The Execution Model: Hierarchy of Parallelism
+
+GPUs execute code in a strict hierarchy:
+
+```
+    Grid
+      ├── Block 0
+      │     ├── Warp 0 (32 threads)
+      │     ├── Warp 1 (32 threads)
+      │     └── ...
+      ├── Block 1
+      │     ├── Warp 0
+      │     └── ...
+      └── ...
+```
+
+### Grids, Blocks, and Threads
+
+**Thread:** Single execution unit. Each thread runs the same kernel code with different data.
+
+**Warp:** Group of 32 threads that execute in lockstep (SIMT - Single Instruction, Multiple Threads).
+
+**Block:** Group of threads (up to 1024) that can cooperate via shared memory.
+
+**Grid:** Collection of blocks. The entire kernel launch.
+
+**Example kernel launch:**
+
+```cuda
+// Launch 256 blocks, each with 256 threads
+myKernel<<<256, 256>>>(data);
+
+// Total: 256 × 256 = 65,536 threads
+```
+
+Each thread knows its identity:
+
+```cuda
+__global__ void myKernel(float* data) {
+    // Thread's position within its block
+    int tid = threadIdx.x;
+
+    // Block's position within the grid
+    int bid = blockIdx.x;
+
+    // Global thread ID
+    int gid = bid * blockDim.x + tid;
+
+    // Process data[gid]
+    data[gid] = data[gid] * 2.0f;
+}
+```
+
+### Why This Hierarchy?
+
+**Warps enable SIMT:**
+- 32 threads execute the same instruction simultaneously
+- Amortizes instruction fetch/decode cost
+- Enables massive parallelism with limited control logic
+
+**Blocks enable cooperation:**
+- Threads in a block share fast memory (shared memory)
+- Can synchronize with `__syncthreads()`
+- Essential for tiling and reduction algorithms
+
+**Grids enable scale:**
+- Blocks execute independently (can run in any order)
+- Enables scaling to thousands of cores
+- Allows GPU to dynamically schedule blocks
+
+## The Memory Hierarchy
+
+GPUs have a complex memory hierarchy, much steeper than CPUs:
+
+```
+┌─────────────────────────────────────────┐
+│  Registers (per thread)                 │  ~10,000 GB/s
+│  - Fastest, private to thread           │  ~256 KB per SM
+│  - Latency: ~1 cycle                    │
+├─────────────────────────────────────────┤
+│  Shared Memory (per block)              │  ~8,000 GB/s
+│  - Fast, shared within block            │  ~164 KB per SM (A100)
+│  - Latency: ~20 cycles                  │
+│  - Explicitly managed                   │
+├─────────────────────────────────────────┤
+│  L1 Cache (per SM)                      │  ~6,000 GB/s
+│  - Shared with shared memory            │  ~164 KB per SM
+│  - Automatically managed                │
+├─────────────────────────────────────────┤
+│  L2 Cache (global)                      │  ~4,000 GB/s
+│  - Shared across all SMs                │  40 MB (A100)
+│  - Automatically managed                │
+├─────────────────────────────────────────┤
+│  HBM (High Bandwidth Memory)            │  1,555 GB/s (A100)
+│  - Main GPU memory                      │  40-80 GB
+│  - Latency: ~400 cycles                 │
+└─────────────────────────────────────────┘
+```
+
+**Key insight:** The gap between registers and HBM is **200×** in bandwidth and **400×** in latency.
+
+### Registers: The Fastest Memory
+
+Each thread has private registers (up to 255 per thread).
+
+```cuda
+__global__ void compute(float* out, float* in) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // These are in registers
+    float a = in[i];
+    float b = a * 2.0f;
+    float c = b + 1.0f;
+
+    out[i] = c;  // Write once to global memory
+}
+```
+
+**Register pressure:** Using too many registers reduces occupancy (fewer threads can run concurrently).
+
+**Example:**
+- Kernel uses 64 registers per thread
+- SM has 65,536 registers
+- Max threads: 65,536 / 64 = 1,024 per SM
+
+But if kernel used 32 registers:
+- Max threads: 65,536 / 32 = 2,048 per SM (**2× better occupancy**)
+
+### Shared Memory: Explicitly Managed Cache
+
+Shared memory is:
+- Fast (nearly as fast as L1)
+- **Explicitly managed** (you control what's in it)
+- Shared among threads in a block
+- **Perfect for tiling**
+
+**Example: Tiled matrix multiply**
+
+```cuda
+__global__ void matmul_tiled(float* C, float* A, float* B, int N) {
+    __shared__ float As[TILE_SIZE][TILE_SIZE];
+    __shared__ float Bs[TILE_SIZE][TILE_SIZE];
+
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int row = blockIdx.y * TILE_SIZE + ty;
+    int col = blockIdx.x * TILE_SIZE + tx;
+
+    float sum = 0.0f;
+
+    for (int t = 0; t < N / TILE_SIZE; t++) {
+        // Load tile into shared memory
+        As[ty][tx] = A[row * N + t * TILE_SIZE + tx];
+        Bs[ty][tx] = B[(t * TILE_SIZE + ty) * N + col];
+
+        __syncthreads();  // Wait for all threads to load
+
+        // Compute using shared memory (fast!)
+        for (int k = 0; k < TILE_SIZE; k++) {
+            sum += As[ty][k] * Bs[k][tx];
+        }
+
+        __syncthreads();  // Wait before loading next tile
+    }
+
+    C[row * N + col] = sum;
+}
+```
+
+**Why this is fast:**
+- Each element of A and B is loaded once from HBM
+- Reused TILE_SIZE times from shared memory
+- Reduces HBM traffic by ~TILE_SIZE×
+
+### Bank Conflicts in Shared Memory
+
+Shared memory is divided into 32 **banks**. Threads in a warp can access different banks simultaneously, but accessing the same bank causes **serialization**.
+
+**Bad access pattern (bank conflict):**
+
+```cuda
+__shared__ float data[1024];
+int tid = threadIdx.x;
+
+// All threads access the same bank!
+float value = data[tid * 32];  // Serialized: 32× slower
+```
+
+**Good access pattern (no conflict):**
+
+```cuda
+__shared__ float data[1024];
+int tid = threadIdx.x;
+
+// Each thread accesses a different bank
+float value = data[tid];  // Parallel access
+```
+
+**Padding to avoid conflicts:**
+
+```cuda
+// Without padding: conflicts
+__shared__ float tile[32][32];
+
+// With padding: no conflicts
+__shared__ float tile[32][33];  // Extra column avoids bank conflicts
+```
+
+### L1 and L2 Cache
+
+Unlike shared memory, L1 and L2 are **automatically managed**. You don't control what's cached.
+
+**L1:** Per-SM, ~164 KB (shared with shared memory). Caches global memory accesses.
+
+**L2:** Global, 40 MB on A100. Shared across all SMs.
+
+**You can't explicitly load into L1/L2**, but you can write "cache-friendly" code:
+- Sequential access patterns
+- Reuse recently accessed data
+- Avoid random access
+
+### Global Memory (HBM): The Bottleneck
+
+HBM is the main GPU memory (40-80 GB). It's:
+- Large
+- Relatively slow (1,555 GB/s on A100)
+- High latency (~400 cycles)
+
+**The cardinal rule:** Minimize HBM traffic.
+
+**Memory coalescing:** Threads in a warp should access consecutive memory addresses.
+
+**Good (coalesced):**
+```cuda
+int tid = threadIdx.x + blockIdx.x * blockDim.x;
+float value = data[tid];  // Consecutive access
+```
+
+**Bad (uncoalesced):**
+```cuda
+int tid = threadIdx.x + blockIdx.x * blockDim.x;
+float value = data[tid * 32];  // Strided access, 32× slower!
+```
+
+**Why?** GPU loads memory in 32-byte or 128-byte segments. If threads access scattered addresses, each segment is loaded separately.
+
+## Streaming Multiprocessors (SMs)
+
+An A100 has 108 SMs. Each SM has:
+- 64 FP32 cores
+- 64 INT32 cores
+- 32 FP64 cores
+- 4 tensor cores
+- 65,536 registers
+- 164 KB shared memory/L1
+- Warp schedulers
+
+**Key insight:** An SM can execute multiple warps concurrently, hiding latency.
+
+### Occupancy: Keeping the SM Busy
+
+**Occupancy:** Percentage of max threads actually running on an SM.
+
+**Max threads per SM:** 2,048 (A100)
+
+If your kernel launches 1,024 threads per SM:
+- Occupancy = 1,024 / 2,048 = 50%
+
+**Why does occupancy matter?**
+
+GPUs hide memory latency by switching between warps:
+- Warp A: Load from memory (400 cycles)
+- **GPU switches to Warp B** while A waits
+- Warp B: Load from memory
+- **GPU switches to Warp C**
+- Eventually Warp A's load completes → GPU switches back
+
+**Higher occupancy = more warps = better latency hiding.**
+
+### Occupancy Calculators
+
+Occupancy depends on:
+1. Registers per thread
+2. Shared memory per block
+3. Threads per block
+
+**Example:**
+
+```
+Kernel parameters:
+- Threads per block: 256
+- Registers per thread: 48
+- Shared memory per block: 48 KB
+
+SM resources (A100):
+- Max threads: 2,048
+- Max registers: 65,536
+- Max shared memory: 164 KB
+
+Limits:
+- Thread limit: 2,048 / 256 = 8 blocks per SM
+- Register limit: 65,536 / (256 × 48) = 5.3 blocks per SM ← Bottleneck!
+- Shared memory limit: 164 KB / 48 KB = 3.4 blocks per SM
+
+Actual: min(8, 5, 3) = 3 blocks per SM
+Occupancy: (3 × 256) / 2,048 = 37.5%
+```
+
+**Optimization:** Reduce registers or shared memory to increase occupancy.
+
+**But:** Higher occupancy ≠ always faster. Sometimes using more registers and fewer threads is faster because each thread does more work.
+
+## Warp Execution and Divergence
+
+All threads in a warp execute the **same instruction**. What if they take different branches?
+
+```cuda
+if (threadIdx.x < 16) {
+    // Threads 0-15 execute this
+    result = a + b;
+} else {
+    // Threads 16-31 execute this
+    result = a * b;
+}
+```
+
+**What happens:**
+1. Threads 0-15 execute `a + b`, threads 16-31 are **masked off** (idle)
+2. Then threads 16-31 execute `a * b`, threads 0-15 are **masked off**
+
+**Both branches execute serially!** This is **warp divergence**.
+
+### Avoiding Divergence
+
+**Bad:**
+```cuda
+if (threadIdx.x % 2 == 0) {
+    // Half of warp
+} else {
+    // Other half
+}
+// Divergence on every warp
+```
+
+**Good:**
+```cuda
+int warpId = threadIdx.x / 32;
+if (warpId == 0) {
+    // Entire warp 0 takes this path
+} else {
+    // Other warps take this path
+}
+// No divergence within warps
+```
+
+**Guideline:** Condition on warp-aligned values, not thread-level values.
+
+## Tensor Cores: The Matrix Multiply Accelerators
+
+Modern GPUs have specialized **tensor cores** for matrix multiply:
+
+```
+D = A × B + C
+```
+
+Where A, B, C, D are small matrices (typically 16×16 or 8×16).
+
+**Performance:**
+- FP16 tensor cores on A100: 312 TFLOPS
+- FP16 CUDA cores on A100: 19.5 TFLOPS
+- **Speedup: 16×!**
+
+**But:** Tensor cores require specific data formats and sizes.
+
+### Using Tensor Cores (High Level)
+
+In PyTorch, tensor cores are used automatically when:
+1. Tensor dtypes are FP16 or BF16
+2. Dimensions are multiples of 8 (for FP16) or 16 (for BF16)
+3. Operation is a matrix multiply or convolution
+
+```python
+# Enables tensor cores
+A = torch.randn(1024, 1024, dtype=torch.float16, device='cuda')
+B = torch.randn(1024, 1024, dtype=torch.float16, device='cuda')
+C = A @ B  # Uses tensor cores automatically
+
+# Doesn't use tensor cores (FP32)
+A = torch.randn(1024, 1024, dtype=torch.float32, device='cuda')
+B = torch.randn(1024, 1024, dtype=torch.float32, device='cuda')
+C = A @ B  # Uses CUDA cores
+```
+
+### Using Tensor Cores (CUDA)
+
+**WMMA API (Warp Matrix Multiply-Accumulate):**
+
+```cuda
+#include <mma.h>
+using namespace nvcuda;
+
+__global__ void matmul_wmma(half* C, half* A, half* B, int M, int N, int K) {
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
+    wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
+    wmma::fragment<wmma::accumulator, 16, 16, 16, half> c_frag;
+
+    // Load 16×16 tiles
+    wmma::load_matrix_sync(a_frag, A, 16);
+    wmma::load_matrix_sync(b_frag, B, 16);
+    wmma::fill_fragment(c_frag, 0.0f);
+
+    // Perform 16×16×16 matrix multiply
+    wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+
+    // Store result
+    wmma::store_matrix_sync(C, c_frag, 16, wmma::mem_row_major);
+}
+```
+
+**This one call does 16×16×16 = 4,096 multiply-adds in a single instruction!**
+
+## Asynchronous Execution and Streams
+
+GPUs execute **asynchronously** with respect to the CPU.
+
+```python
+# This returns immediately! GPU kernel is launched but not finished
+result = torch.matmul(A, B)
+
+# CPU continues here while GPU is working
+print("GPU is still computing...")
+
+# This forces CPU to wait for GPU
+result_cpu = result.cpu()  # Blocks until GPU finishes
+```
+
+### Streams: Concurrent Execution
+
+You can launch multiple operations on different **streams** to run concurrently:
+
+```python
+stream1 = torch.cuda.Stream()
+stream2 = torch.cuda.Stream()
+
+with torch.cuda.stream(stream1):
+    result1 = model1(input1)  # GPU works on this
+
+with torch.cuda.stream(stream2):
+    result2 = model2(input2)  # GPU works on this concurrently
+
+# Synchronize both streams
+torch.cuda.synchronize()
+```
+
+**Use case:** Overlap compute and data transfer.
+
+```python
+# Transfer next batch while computing current batch
+stream_compute = torch.cuda.Stream()
+stream_transfer = torch.cuda.Stream()
+
+for i, batch in enumerate(dataloader):
+    with torch.cuda.stream(stream_transfer):
+        next_batch = next(dataloader).cuda(non_blocking=True)
+
+    with torch.cuda.stream(stream_compute):
+        loss = model(batch)
+        loss.backward()
+```
+
+## Case Study: Why Naive Matrix Multiply Is Slow
+
+Let's trace what happens with a naive matrix multiply on GPU:
+
+```cuda
+__global__ void matmul_naive(float* C, float* A, float* B, int N) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    float sum = 0.0f;
+    for (int k = 0; k < N; k++) {
+        sum += A[row * N + k] * B[k * N + col];
+    }
+    C[row * N + col] = sum;
+}
+```
+
+**Problems:**
+
+1. **Each element of A and B is loaded N times** (once per thread that needs it)
+2. **B accesses are strided** (not coalesced): `B[k * N + col]` skips N elements
+3. **No reuse of loaded data**
+
+**For N = 1024:**
+- Each thread loads 2048 floats (1024 from A, 1024 from B)
+- Total threads: 1024² = 1,048,576
+- **Total memory traffic: 2048 × 1,048,576 × 4 bytes = 8 TB!**
+- A100 bandwidth: 1.5 TB/s
+- **Time: 8 TB / 1.5 TB/s = 5.3 seconds**
+
+**Tiled version with shared memory:**
+- Each element loaded once per tile
+- With 32×32 tiles: ~32× less traffic
+- **Time: ~160 ms (33× faster!)**
+
+**cuBLAS (optimized library):**
+- Uses tensor cores + heavy optimization
+- **Time: ~3 ms (1,700× faster than naive!)**
+
+**Lesson:** Proper use of memory hierarchy is critical.
+
+## Practical Guidelines
+
+### 1. Choose Block Size Wisely
+
+**Common choices:** 128, 256, 512 threads per block
+
+**Rule of thumb:**
+- For memory-bound: 256 threads (higher occupancy for latency hiding)
+- For compute-bound: 128-256 threads (balance)
+- **Always a multiple of 32** (warp size)
+
+### 2. Maximize Occupancy (But Not Blindly)
+
+Use `--ptxas-options=-v` to see register usage:
+
+```bash
+nvcc -arch=sm_80 --ptxas-options=-v kernel.cu
+```
+
+Output shows:
+```
+ptxinfo    : Used 48 registers, 4096 bytes smem
+ptxinfo    : Compiling entry function 'myKernel'
+```
+
+**Then use occupancy calculator** to see if you're register-limited.
+
+### 3. Profile Before Optimizing
+
+```bash
+# Nsight Compute
+ncu --set full -o profile ./program
+
+# Look at:
+# - SM Efficiency (target: >80%)
+# - Memory Throughput (target: >70% for memory-bound)
+# - Warp execution efficiency (target: >80%)
+```
+
+### 4. Coalesce Memory Access
+
+**Always access consecutive addresses across threads in a warp.**
+
+### 5. Use Shared Memory for Tiling
+
+If you're reading the same data multiple times, put it in shared memory.
+
+### 6. Avoid Warp Divergence
+
+Branch on warp-aligned values when possible.
+
+### 7. Use Tensor Cores
+
+For FP16/BF16 matrix operations, tensor cores give 10-20× speedup.
+
+## Connections
+
+**Chapter 1 (Memory Hierarchy)**: GPU memory hierarchy is even steeper than CPU.
+
+**Chapter 2 (Bandwidth)**: HBM bandwidth is the primary constraint for most ML kernels.
+
+**Chapter 7 (Locality)**: Tiling with shared memory is locality optimization for GPUs.
+
+**Chapter 10 (FlashAttention)**: Uses shared memory tiling to stay within GPU SRAM.
+
+**Chapter 19 (Profiling)**: Nsight tools reveal GPU-specific bottlenecks.
+
+## Key Takeaways
+
+1. **Grids → Blocks → Warps → Threads**: Understand the execution hierarchy.
+
+2. **Memory hierarchy is steep**: 200× gap between registers and HBM.
+
+3. **Occupancy matters**: More warps = better latency hiding.
+
+4. **Warp divergence is costly**: Both branches execute serially.
+
+5. **Memory coalescing is essential**: Threads in a warp should access consecutive addresses.
+
+6. **Shared memory enables tiling**: Explicit control over fast memory.
+
+7. **Tensor cores give 10-20× speedup**: Use FP16/BF16 for matrix ops.
+
+8. **Profile with Nsight**: Don't guess, measure.
+
+---
+
+::: {.callout-note}
+## Learning Path
+
+**Week 1:** Understand execution model (grids, blocks, warps)
+**Week 2:** Memory hierarchy and coalescing
+**Week 3:** Shared memory and tiling
+**Week 4:** Occupancy optimization
+**Week 5:** Tensor cores and advanced topics
+
+By week 5, you'll understand why GPU code behaves the way it does.
+:::
+
+---
+
+## Further Reading
+
+- NVIDIA CUDA C Programming Guide: https://docs.nvidia.com/cuda/cuda-c-programming-guide/
+- "Programming Massively Parallel Processors" by Kirk & Hwu
+- NVIDIA Developer Blog: https://developer.nvidia.com/blog/
+- Nsight Compute documentation
+

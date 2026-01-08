@@ -1,6 +1,8 @@
 ---
 title: "Chunking"
 subtitle: "How Associativity Enables Parallelism and Streaming"
+---
+
 ::: {.chapter-opener}
 You have a billion numbers. You need their average.
 

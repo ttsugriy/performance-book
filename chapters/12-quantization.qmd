@@ -1,6 +1,8 @@
 ---
 title: "Investigation: Quantization"
 subtitle: "Why 4 Bits Can Do the Work of 32"
+---
+
 ::: {.chapter-opener}
 Take a 70-billion-parameter model. Reduce every weight from 32 bits to 4 bits.
 

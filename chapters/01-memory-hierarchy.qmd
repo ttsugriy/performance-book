@@ -4,6 +4,8 @@ subtitle: "Understanding the True Cost of Data Access"
 id: sec-memory-hierarchy
 ---
 
+---
+
 ::: {.chapter-opener}
 In 1950, John von Neumann described a computer architecture where memory is uniform. Every address takes the same time to access. Every byte is equally close to the processor.
 

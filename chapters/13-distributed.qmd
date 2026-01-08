@@ -2,6 +2,8 @@
 title: "Distributed Training"
 subtitle: "When One GPU Isn't Enough"
 id: sec-distributed
+---
+
 ::: {.chapter-opener}
 GPT-3 has 175 billion parameters. At FP16, that's 350GB. The largest single GPU has 80GB of memory.
 

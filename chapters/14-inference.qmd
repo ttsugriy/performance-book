@@ -2,6 +2,8 @@
 title: "Inference Optimization"
 subtitle: "KV Caching, Speculative Decoding, and Serving at Scale"
 id: sec-inference
+---
+
 ::: {.chapter-opener}
 Training is batch-oriented: process thousands of examples together. Inference is latency-oriented: one user waits for one response.
 

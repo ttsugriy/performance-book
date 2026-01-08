@@ -1,6 +1,8 @@
 ---
 title: "Factoring"
 subtitle: "When Big Computations Decompose Into Small Ones"
+---
+
 ::: {.chapter-opener}
 Take a 70-billion-parameter model. Fine-tune it on your task.
 

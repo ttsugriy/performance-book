@@ -1,0 +1,731 @@
+---
+title: "Compiler Optimizations"
+subtitle: "What Happens to Your Code"
+id: sec-compiler-opts
+---
+
+---
+
+::: {.chapter-opener}
+You write code. The compiler transforms it. Sometimes by 100×.
+
+Understanding what compilers do—and what they can't do—is essential for writing fast code. This chapter opens the black box.
+:::
+
+## The Compiler's Job
+
+A compiler has one goal: **generate the fastest possible machine code** while preserving program semantics.
+
+**Input:** Your source code (C++, Rust, etc.)
+**Output:** Machine code (x86, ARM, etc.)
+
+Between input and output: **hundreds of transformation passes**.
+
+```
+Source Code
+    ↓
+Frontend (parsing, type checking)
+    ↓
+Intermediate Representation (IR)
+    ↓
+Optimization Passes (100+ transformations)
+    ↓
+Backend (instruction selection, register allocation)
+    ↓
+Machine Code
+```
+
+We'll focus on the **optimization passes**—the transformations that make code fast.
+
+## Loop Transformations: The Core of Performance
+
+Most compute-intensive code spends time in loops. Compilers have an arsenal of loop transformations.
+
+### Loop Unrolling
+
+**Original:**
+```cpp
+for (int i = 0; i < 100; i++) {
+    a[i] = b[i] + c[i];
+}
+```
+
+**After unrolling (factor 4):**
+```cpp
+for (int i = 0; i < 100; i += 4) {
+    a[i]   = b[i]   + c[i];
+    a[i+1] = b[i+1] + c[i+1];
+    a[i+2] = b[i+2] + c[i+2];
+    a[i+3] = b[i+3] + c[i+3];
+}
+```
+
+**Why faster:**
+1. Fewer loop overhead instructions (less branching)
+2. More instruction-level parallelism (4 adds can execute simultaneously)
+3. Easier to vectorize
+
+**Tradeoff:** Larger code size, potential instruction cache pressure.
+
+**Compiler flag:**
+```bash
+gcc -O3 -funroll-loops source.c
+```
+
+### Loop Interchange
+
+Changes loop nesting order for better cache behavior.
+
+**Original (bad for cache):**
+```cpp
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        C[i][j] = A[i][j] + B[j][i];  // B accessed in column-major!
+    }
+}
+```
+
+**After interchange (good for cache):**
+```cpp
+for (int j = 0; j < N; j++) {
+    for (int i = 0; i < N; i++) {
+        C[i][j] = A[i][j] + B[j][i];  // Both row-major now
+    }
+}
+```
+
+**Why faster:** Sequential memory access → cache-friendly.
+
+**When compilers do this:** When they can prove it's legal (no dependencies broken).
+
+### Loop Tiling (Blocking)
+
+Divides loops into tiles that fit in cache.
+
+**Original:**
+```cpp
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        for (int k = 0; k < N; k++) {
+            C[i][j] += A[i][k] * B[k][j];
+        }
+    }
+}
+```
+
+**After tiling:**
+```cpp
+#define TILE 32
+for (int ii = 0; ii < N; ii += TILE) {
+    for (int jj = 0; jj < N; jj += TILE) {
+        for (int kk = 0; kk < N; kk += TILE) {
+            // Process TILE×TILE block
+            for (int i = ii; i < min(ii+TILE, N); i++) {
+                for (int j = jj; j < min(jj+TILE, N); j++) {
+                    for (int k = kk; k < min(kk+TILE, N); k++) {
+                        C[i][j] += A[i][k] * B[k][j];
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+**Why faster:** Tiles fit in cache; each element reused many times before eviction.
+
+**Compiler limits:** Advanced compilers (ICC, Pluto) can tile, but it's difficult. Often needs manual help.
+
+### Loop Fusion
+
+Combines multiple loops to reduce memory traffic.
+
+**Original:**
+```cpp
+for (int i = 0; i < N; i++) {
+    a[i] = b[i] + 1;
+}
+for (int i = 0; i < N; i++) {
+    c[i] = a[i] * 2;
+}
+```
+
+**After fusion:**
+```cpp
+for (int i = 0; i < N; i++) {
+    a[i] = b[i] + 1;
+    c[i] = a[i] * 2;
+}
+```
+
+**Why faster:**
+1. One pass over data instead of two
+2. `a[i]` stays in registers between ops
+3. Better cache locality
+
+**This is operator fusion (Chapter 8) at the compiler level!**
+
+### Loop Fission (Distribution)
+
+Opposite of fusion: splits loops to improve parallelization or vectorization.
+
+**Original:**
+```cpp
+for (int i = 0; i < N; i++) {
+    a[i] = expensive_computation(b[i]);
+    c[i] = cheap_computation(d[i]);  // Independent!
+}
+```
+
+**After fission:**
+```cpp
+for (int i = 0; i < N; i++) {
+    a[i] = expensive_computation(b[i]);
+}
+for (int i = 0; i < N; i++) {
+    c[i] = cheap_computation(d[i]);
+}
+```
+
+**Why faster:** Second loop can be vectorized independently, or parallelized differently.
+
+## Auto-Vectorization (SIMD)
+
+Modern CPUs have SIMD (Single Instruction, Multiple Data) units:
+- **AVX-512**: 512-bit vectors (16 floats, 8 doubles)
+- **AVX2**: 256-bit vectors (8 floats, 4 doubles)
+- **NEON (ARM)**: 128-bit vectors (4 floats)
+
+**Scalar code:**
+```cpp
+for (int i = 0; i < N; i++) {
+    c[i] = a[i] + b[i];
+}
+```
+
+**Vectorized (AVX2):**
+```cpp
+for (int i = 0; i < N; i += 8) {
+    __m256 va = _mm256_load_ps(&a[i]);
+    __m256 vb = _mm256_load_ps(&b[i]);
+    __m256 vc = _mm256_add_ps(va, vb);
+    _mm256_store_ps(&c[i], vc);
+}
+```
+
+**Speedup: 8× for FP32** (8 operations per instruction).
+
+### When Auto-Vectorization Works
+
+**Good (compiler vectorizes):**
+```cpp
+for (int i = 0; i < N; i++) {
+    c[i] = a[i] + b[i];  // Simple, independent operations
+}
+```
+
+**Bad (compiler can't vectorize):**
+```cpp
+for (int i = 1; i < N; i++) {
+    a[i] = a[i-1] + b[i];  // Loop-carried dependency!
+}
+```
+
+**Why?** Each iteration depends on the previous one. Can't compute 8 iterations in parallel.
+
+### Helping the Compiler Vectorize
+
+**Use `restrict` to eliminate aliasing:**
+
+```cpp
+// Compiler doesn't know if a and b overlap
+void add(float* a, float* b, float* c, int N) {
+    for (int i = 0; i < N; i++) {
+        c[i] = a[i] + b[i];
+    }
+}
+
+// With restrict: compiler knows they don't overlap → can vectorize
+void add(float* __restrict__ a, float* __restrict__ b,
+         float* __restrict__ c, int N) {
+    for (int i = 0; i < N; i++) {
+        c[i] = a[i] + b[i];
+    }
+}
+```
+
+**Align data:**
+```cpp
+// Misaligned loads are slower
+float* a = (float*)malloc(N * sizeof(float));
+
+// Aligned loads are fast
+float* a = (float*)aligned_alloc(32, N * sizeof(float));
+```
+
+**Use pragmas:**
+```cpp
+#pragma omp simd
+for (int i = 0; i < N; i++) {
+    c[i] = a[i] + b[i];
+}
+```
+
+## Common Compiler Optimizations
+
+### Constant Folding
+
+**Before:**
+```cpp
+int x = 3 + 4;
+int y = x * 2;
+```
+
+**After:**
+```cpp
+int x = 7;
+int y = 14;
+```
+
+Computes at compile time instead of runtime.
+
+### Dead Code Elimination
+
+**Before:**
+```cpp
+int x = 5;
+int y = x + 1;  // Never used
+return x;
+```
+
+**After:**
+```cpp
+int x = 5;
+return x;
+```
+
+Removes unused computations.
+
+### Common Subexpression Elimination
+
+**Before:**
+```cpp
+int a = b * c + d;
+int e = b * c + f;
+```
+
+**After:**
+```cpp
+int temp = b * c;
+int a = temp + d;
+int e = temp + f;
+```
+
+Computes `b * c` once instead of twice.
+
+### Function Inlining
+
+**Before:**
+```cpp
+inline int square(int x) { return x * x; }
+
+int main() {
+    int a = square(5);
+}
+```
+
+**After:**
+```cpp
+int main() {
+    int a = 5 * 5;
+}
+```
+
+Eliminates function call overhead.
+
+**Tradeoff:** Can increase code size significantly.
+
+### Strength Reduction
+
+Replaces expensive operations with cheaper ones.
+
+**Before:**
+```cpp
+for (int i = 0; i < N; i++) {
+    a[i] = i * 8;  // Multiply
+}
+```
+
+**After:**
+```cpp
+for (int i = 0; i < N; i++) {
+    a[i] = i << 3;  // Bit shift (faster)
+}
+```
+
+## Polyhedral Optimization
+
+Advanced technique for complex loop nests.
+
+**Polyhedral compilers** (Pluto, Polly in LLVM) represent loop iterations as points in a polyhedron, then apply mathematical transformations.
+
+**Example:**
+```cpp
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        A[i][j] = B[i][j] + C[i][j];
+    }
+}
+for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+        D[i][j] = A[i][j] * 2;
+    }
+}
+```
+
+**After polyhedral optimization (fusion + tiling):**
+```cpp
+#define TILE 32
+for (int ii = 0; ii < N; ii += TILE) {
+    for (int jj = 0; jj < N; jj += TILE) {
+        for (int i = ii; i < min(ii+TILE, N); i++) {
+            for (int j = jj; j < min(jj+TILE, N); j++) {
+                A[i][j] = B[i][j] + C[i][j];
+                D[i][j] = A[i][j] * 2;
+            }
+        }
+    }
+}
+```
+
+**Benefit:** Automatic tiling + fusion for cache efficiency.
+
+**Limitation:** Only works for "affine" loops (array indices are linear functions of loop variables).
+
+## When Compilers Fail
+
+Compilers can't optimize everything. Here's what stops them:
+
+### 1. Pointer Aliasing
+
+**Problem:**
+```cpp
+void func(int* a, int* b, int N) {
+    for (int i = 0; i < N; i++) {
+        a[i] = b[i] + 1;
+    }
+}
+```
+
+**Compiler thinks:** "What if `a` and `b` overlap? I can't vectorize."
+
+**Solution:** Use `__restrict__` to promise no aliasing.
+
+### 2. Complex Control Flow
+
+**Problem:**
+```cpp
+for (int i = 0; i < N; i++) {
+    if (condition_depending_on_data(a[i])) {
+        result += expensive_function(a[i]);
+    } else {
+        result += cheap_function(a[i]);
+    }
+}
+```
+
+**Compiler thinks:** "Too complex to analyze. Can't vectorize."
+
+**Solution:** Sometimes manual SIMD or restructuring.
+
+### 3. Function Calls in Loops
+
+**Problem:**
+```cpp
+for (int i = 0; i < N; i++) {
+    a[i] = external_function(b[i]);  // Unknown function
+}
+```
+
+**Compiler thinks:** "Don't know what this function does. Can't optimize."
+
+**Solution:** Mark function as `inline` or `__attribute__((const))`.
+
+### 4. Virtual Functions (C++)
+
+**Problem:**
+```cpp
+for (int i = 0; i < N; i++) {
+    result += objects[i]->virtual_method();  // Virtual dispatch
+}
+```
+
+**Compiler thinks:** "Don't know which implementation at compile time."
+
+**Solution:** Use template-based polymorphism when possible.
+
+## Reading Compiler Output
+
+Compilers can tell you what they optimized (or didn't).
+
+### GCC/Clang: Optimization Reports
+
+```bash
+gcc -O3 -fopt-info-vec -fopt-info-vec-missed source.c
+```
+
+**Output:**
+```
+source.c:10:5: optimized: loop vectorized using 16 byte vectors
+source.c:25:5: missed: couldn't vectorize loop (data dependency)
+```
+
+**Or more verbose:**
+```bash
+gcc -O3 -fopt-info-all source.c
+```
+
+### Clang: Remark System
+
+```bash
+clang -O3 -Rpass=loop-vectorize -Rpass-missed=loop-vectorize source.c
+```
+
+**Output:**
+```
+source.c:10:5: remark: vectorized loop (vectorization width: 8)
+source.c:25:5: remark: loop not vectorized: cannot prove it is safe
+```
+
+### Intel Compiler: Optimization Report
+
+```bash
+icc -O3 -qopt-report=5 -qopt-report-phase=vec source.c
+```
+
+Generates detailed `.optrpt` files showing every optimization decision.
+
+## Inspecting Generated Assembly
+
+Sometimes you need to see the actual machine code.
+
+```bash
+gcc -O3 -S -fverbose-asm source.c
+# Creates source.s with annotated assembly
+```
+
+**Example output:**
+```asm
+# Loop at source.c:10
+.L3:
+    vmovups (%rsi,%rax), %ymm0    # Load 8 floats (AVX2)
+    vaddps  (%rdx,%rax), %ymm0, %ymm0
+    vmovups %ymm0, (%rdi,%rax)    # Store 8 floats
+    addq    $32, %rax              # Advance pointer
+    cmpq    %rcx, %rax
+    jne     .L3
+```
+
+**Interpretation:** Compiler vectorized with AVX2 (8 floats at a time).
+
+## Profile-Guided Optimization (PGO)
+
+Use runtime data to guide compiler optimizations.
+
+**Step 1: Compile with instrumentation**
+```bash
+gcc -O3 -fprofile-generate source.c -o program
+```
+
+**Step 2: Run with representative workload**
+```bash
+./program < typical_input.txt
+# Generates .gcda profile files
+```
+
+**Step 3: Recompile with profile**
+```bash
+gcc -O3 -fprofile-use source.c -o program_optimized
+```
+
+**What PGO enables:**
+- Better inlining decisions (inline hot functions)
+- Better code layout (hot code contiguous in memory)
+- Better branch prediction
+
+**Speedup:** 10-30% for some workloads.
+
+## Link-Time Optimization (LTO)
+
+Optimize across entire program, not just individual files.
+
+**Without LTO:**
+```bash
+gcc -O3 -c file1.c -o file1.o
+gcc -O3 -c file2.c -o file2.o
+gcc file1.o file2.o -o program
+# Each file optimized independently
+```
+
+**With LTO:**
+```bash
+gcc -O3 -flto -c file1.c -o file1.o
+gcc -O3 -flto -c file2.o -o file2.o
+gcc -flto file1.o file2.o -o program
+# Optimized as one unit
+```
+
+**Enables:**
+- Cross-file inlining
+- Better dead code elimination
+- Global constant propagation
+
+**Downside:** Slower compilation.
+
+## How torch.compile Works
+
+PyTorch 2.0's `torch.compile` is an **ahead-of-time compiler** that applies many of these optimizations to PyTorch models.
+
+**Workflow:**
+1. **Trace** the model to capture computation graph
+2. **Optimize** the graph (fusion, CSE, etc.)
+3. **Code generation** to Triton or C++
+4. **Compile** the generated code
+
+**Example optimizations:**
+- Operator fusion (like loop fusion)
+- Constant folding
+- Dead code elimination
+- Memory layout optimization
+
+**Effect:** 2-10× speedup without code changes.
+
+## Practical Guidelines
+
+### 1. Use Optimization Flags
+
+```bash
+# Release builds
+gcc -O3 -march=native source.c
+
+# Debug builds (don't optimize)
+gcc -O0 -g source.c
+```
+
+**Never profile `-O0` builds!**
+
+### 2. Help the Compiler
+
+- Use `restrict` for non-aliasing pointers
+- Mark functions `inline` or `const`
+- Align data structures
+- Avoid complex control flow in hot loops
+
+### 3. Check What Happened
+
+```bash
+# See what got vectorized
+gcc -O3 -fopt-info-vec source.c
+
+# See assembly
+gcc -O3 -S -fverbose-asm source.c
+```
+
+### 4. Consider PGO for Hot Paths
+
+If 90% of time is in one function, PGO can help.
+
+### 5. Use LTO for Final Builds
+
+```bash
+gcc -O3 -flto *.c -o program
+```
+
+Small compile-time cost, often 5-15% runtime gain.
+
+## Case Study: Matrix Multiply
+
+Let's trace compiler optimizations on matrix multiply.
+
+**Original:**
+```cpp
+void matmul(float* C, float* A, float* B, int N) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            for (int k = 0; k < N; k++) {
+                C[i*N + j] += A[i*N + k] * B[k*N + j];
+            }
+        }
+    }
+}
+```
+
+**What compilers do:**
+
+**GCC -O3:**
+- Loop interchange (reorders k and j sometimes)
+- Unrolling (partial)
+- *No vectorization* (can't prove safety with complex indexing)
+
+**ICC -O3:**
+- Loop interchange
+- Unrolling
+- **Vectorization** (AVX2)
+- **Speedup: ~4× over GCC**
+
+**ICC -O3 -march=native -qopt-report:**
+- Loop blocking (tiling)
+- Aggressive unrolling
+- Prefetching hints
+- **Speedup: ~8× over GCC**
+
+**But still 10-20× slower than OpenBLAS or MKL** (which use hand-tuned assembly and advanced tiling).
+
+**Lesson:** Compilers are good, but expert libraries are better for critical kernels.
+
+## Connections
+
+**Chapter 7 (Locality)**: Loop tiling is a locality optimization the compiler sometimes does.
+
+**Chapter 8 (Fusion)**: Loop fusion at the compiler level.
+
+**Chapter 19 (Profiling)**: Use profiling to find optimization opportunities, then check compiler reports.
+
+## Key Takeaways
+
+1. **Compilers apply 100+ transformations**: Loop optimizations, vectorization, inlining, CSE.
+
+2. **Loop transformations are critical**: Interchange, tiling, unrolling, fusion.
+
+3. **Auto-vectorization gives 4-16× speedup**: When it works. Help it with `restrict`, alignment, simple loops.
+
+4. **Aliasing is the enemy**: Use `__restrict__` to promise non-overlapping pointers.
+
+5. **Read compiler reports**: `-fopt-info` and friends tell you what happened.
+
+6. **PGO can help hot paths**: 10-30% gains with profile-guided optimization.
+
+7. **Compilers aren't magic**: For critical kernels (BLAS, FFT), use expert libraries.
+
+---
+
+::: {.callout-tip}
+## Compiler Comparison
+
+**GCC:** Good all-around, excellent standards compliance
+**Clang:** Fast compilation, good diagnostics
+**ICC (Intel):** Best for x86 (vectorization, loop opts)
+**MSVC:** Windows standard, improving
+
+For numerical code on Intel CPUs, ICC often wins.
+:::
+
+---
+
+## Further Reading
+
+- LLVM documentation: https://llvm.org/docs/
+- GCC optimization options: https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html
+- "Engineering a Compiler" by Cooper & Torczon
+- Polyhedral compilation: https://polyhedral.info/
+
