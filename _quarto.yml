@@ -40,6 +40,7 @@ book:
         - chapters/16-hypothesis.qmd
         - chapters/17-analogy.qmd
         - chapters/18-when-not-to.qmd
+        - chapters/19-profiling-tools.qmd
     - part: "Appendices"
       chapters:
         - chapters/glossary.qmd
