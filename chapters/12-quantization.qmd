@@ -532,4 +532,4 @@ The accompanying notebook walks through:
 
 ---
 
-[**← Previous: LoRA Investigation**](12-lora.qmd) | [**Next: The Art of Measurement →**](20-measurement.qmd)
+[**← Previous: LoRA Investigation**](12-lora.qmd) | [**Next: The Art of Measurement →**](15-measurement.qmd)

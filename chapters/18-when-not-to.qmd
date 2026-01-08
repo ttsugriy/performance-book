@@ -290,11 +290,11 @@ If any are false, reconsider.
 
 ## Connections
 
-**Chapter 20 (Measurement)**: You need profiling to know *what* to optimize.
+**Chapter 15 (Measurement)**: You need profiling to know *what* to optimize.
 
-**Chapter 21 (Hypothesis)**: You need hypothesis-driven debugging to know *why* it's slow.
+**Chapter 16 (Hypothesis)**: You need hypothesis-driven debugging to know *why* it's slow.
 
-**Chapter 22 (Analogy)**: You need pattern recognition to know *how* to fix it.
+**Chapter 17 (Analogy)**: You need pattern recognition to know *how* to fix it.
 
 This chapter adds: knowing *when* to fix it—and when not to.
 
@@ -326,4 +326,4 @@ Smaller gains are rarely worth the complexity cost.
 
 ---
 
-[**← Previous: The Art of Analogy**](22-analogy.qmd) | [**Glossary →**](glossary.qmd)
+[**← Previous: The Art of Analogy**](17-analogy.qmd) | [**Glossary →**](glossary.qmd)

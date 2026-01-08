@@ -386,7 +386,7 @@ The "fusion" here is extreme: all intermediates stay in SRAM, never touching HBM
 
 **Chapter 7 (Locality)**: Fusion improves temporal locality—data is reused before eviction from registers/cache.
 
-**Chapter 11 (FlashAttention)**: The ultimate example of fusion principles applied to attention.
+**Chapter 10 (FlashAttention)**: The ultimate example of fusion principles applied to attention.
 
 ## Key Takeaways
 

@@ -599,4 +599,4 @@ The accompanying notebook walks through:
 
 ---
 
-[**← Previous: FlashAttention Investigation**](11-flash-attention.qmd) | [**Next: Quantization Investigation →**](13-quantization.qmd)
+[**← Previous: FlashAttention Investigation**](11-flash-attention.qmd) | [**Next: Quantization Investigation →**](12-quantization.qmd)

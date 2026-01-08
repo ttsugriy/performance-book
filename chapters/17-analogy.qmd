@@ -583,4 +583,4 @@ This is the nature of fast.
 
 ---
 
-[**← Previous: The Art of Hypothesis**](21-hypothesis.qmd)
+[**← Previous: The Art of Hypothesis**](16-hypothesis.qmd)

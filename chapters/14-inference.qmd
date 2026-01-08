@@ -385,7 +385,7 @@ class LLMServer:
 
 **Chapter 2 (Bandwidth)**: Decode phase is memory-bound. KV cache size directly determines bandwidth requirements.
 
-**Chapter 11 (FlashAttention)**: Essential for prefill phase; enables long context with limited memory.
+**Chapter 10 (FlashAttention)**: Essential for prefill phase; enables long context with limited memory.
 
 **Chapter 13 (Quantization)**: Critical for fitting large models and large KV caches in GPU memory.
 
@@ -419,4 +419,4 @@ class LLMServer:
 
 ---
 
-[**← Previous: Distributed Training**](14-distributed.qmd) | [**Next: Measurement →**](20-measurement.qmd)
+[**← Previous: Distributed Training**](13-distributed.qmd) | [**Next: Measurement →**](15-measurement.qmd)

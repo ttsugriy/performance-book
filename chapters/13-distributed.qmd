@@ -475,4 +475,4 @@ Where:
 
 ---
 
-[**← Previous: Quantization**](13-quantization.qmd) | [**Next: Measurement →**](20-measurement.qmd)
+[**← Previous: Quantization**](12-quantization.qmd) | [**Next: Measurement →**](15-measurement.qmd)

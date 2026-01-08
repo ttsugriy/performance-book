@@ -28,18 +28,18 @@ book:
         - chapters/08-fusion.qmd
     - part: "Part III: The Investigations"
       chapters:
-        - chapters/10-matrix-multiply.qmd
-        - chapters/11-flash-attention.qmd
-        - chapters/12-lora.qmd
-        - chapters/13-quantization.qmd
-        - chapters/14-distributed.qmd
-        - chapters/15-inference.qmd
+        - chapters/09-matrix-multiply.qmd
+        - chapters/10-flash-attention.qmd
+        - chapters/11-lora.qmd
+        - chapters/12-quantization.qmd
+        - chapters/13-distributed.qmd
+        - chapters/14-inference.qmd
     - part: "Part IV: The Method"
       chapters:
-        - chapters/20-measurement.qmd
-        - chapters/21-hypothesis.qmd
-        - chapters/22-analogy.qmd
-        - chapters/23-when-not-to.qmd
+        - chapters/15-measurement.qmd
+        - chapters/16-hypothesis.qmd
+        - chapters/17-analogy.qmd
+        - chapters/18-when-not-to.qmd
     - part: "Appendices"
       chapters:
         - chapters/glossary.qmd

@@ -292,7 +292,7 @@ Total optimization time: ~20 minutes of investigation, 2 lines of code changed.
 
 ## The USE Method as Hypothesis Generator
 
-Brendan Gregg's USE method (Chapter 20) is also a hypothesis generator:
+Brendan Gregg's USE method (Chapter 15) is also a hypothesis generator:
 
 ```
 For each resource, check:
@@ -545,4 +545,4 @@ The accompanying notebook lets you:
 
 ---
 
-[**← Previous: The Art of Measurement**](20-measurement.qmd) | [**Next: The Art of Analogy →**](22-analogy.qmd)
+[**← Previous: The Art of Measurement**](15-measurement.qmd) | [**Next: The Art of Analogy →**](17-analogy.qmd)

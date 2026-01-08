@@ -217,7 +217,7 @@ For n = 32,768, d = 128:
   Reduction: 256×
 ```
 
-Chapter 11 derives FlashAttention in full detail, including:
+Chapter 10 derives FlashAttention in full detail, including:
 
 - The complete tiled algorithm
 - Why failed approaches (sparse attention, gradient checkpointing) don't solve this problem

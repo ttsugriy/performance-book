@@ -501,7 +501,7 @@ For sequence length N:
 - Working set: O(N²) attention matrix
 - At N=2048: 16 MB attention matrix
 
-This is why FlashAttention (Chapter 11) uses tiling—to restore locality to attention.
+This is why FlashAttention (Chapter 10) uses tiling—to restore locality to attention.
 
 ### Batch Size and Locality
 

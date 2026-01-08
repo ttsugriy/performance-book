@@ -636,4 +636,4 @@ The accompanying notebook lets you:
 
 ---
 
-[**← Previous: Quantization Investigation**](13-quantization.qmd) | [**Next: The Art of Hypothesis →**](21-hypothesis.qmd)
+[**← Previous: Quantization Investigation**](12-quantization.qmd) | [**Next: The Art of Hypothesis →**](16-hypothesis.qmd)

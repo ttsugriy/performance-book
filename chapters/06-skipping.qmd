@@ -404,7 +404,7 @@ Sparse attention pattern:
 
 ### The FlashAttention Insight
 
-FlashAttention (Chapter 4, Chapter 11) takes a different approach: don't make attention sparse, but compute it *exactly* with better memory access.
+FlashAttention (Chapter 4, Chapter 10) takes a different approach: don't make attention sparse, but compute it *exactly* with better memory access.
 
 For many applications, FlashAttention + dense attention beats sparse attention:
 - No approximation error

@@ -120,8 +120,8 @@ This glossary defines key terms used throughout the book. Terms are organized al
 | Separability and factoring | Chapter 5 |
 | Sparsity and skipping | Chapter 6 |
 | Locality and tiling | Chapter 7 |
-| FlashAttention | Chapter 11 |
+| FlashAttention | Chapter 10 |
 | LoRA | Chapter 12 |
 | Quantization | Chapter 13 |
-| Measurement | Chapter 20 |
+| Measurement | Chapter 15 |
 :::
