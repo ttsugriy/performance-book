@@ -44,6 +44,8 @@ book:
         - chapters/19-profiling-tools.qmd
         - chapters/20-compiler-opts.qmd
         - chapters/21-triton.qmd
+        - chapters/22-numerical-precision.qmd
+        - chapters/23-production-cases.qmd
     - part: "Appendices"
       chapters:
         - chapters/glossary.qmd

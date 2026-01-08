@@ -1,0 +1,734 @@
+---
+title: "Production Case Studies"
+subtitle: "War Stories from Real Systems"
+id: sec-production-cases
+---
+
+---
+
+::: {.chapter-opener}
+Theory teaches you what's possible. Production teaches you what actually goes wrong. This chapter presents real performance investigations—the kind that start with "the system is slow" and end with root cause and fix.
+:::
+
+## Why Case Studies Matter
+
+Every previous chapter presented clean examples. Production is messier:
+
+- Symptoms don't match causes
+- Multiple issues interact
+- Fixes have trade-offs
+- Time pressure changes decisions
+
+These case studies follow real investigation patterns, showing not just the fix but the *process* of finding it.
+
+## Case Study 1: The 10× Training Slowdown
+
+### The Symptom
+
+A research team reports their training run is 10× slower than last week. Same model, same data, same code (they claim).
+
+### The Investigation
+
+**Step 1: Verify the claim**
+
+```bash
+# Check training throughput
+grep "samples/sec" training.log | tail -20
+
+# Last week: 1200 samples/sec
+# This week: 120 samples/sec
+```
+
+The 10× slowdown is real.
+
+**Step 2: Rule out the obvious**
+
+```python
+# Check GPU utilization
+nvidia-smi --query-gpu=utilization.gpu --format=csv -l 1
+
+# Result: 15% (should be 90%+)
+```
+
+GPU is mostly idle. The problem isn't compute—it's something feeding the GPU.
+
+**Step 3: Profile the training loop**
+
+```python
+import torch.profiler
+
+with torch.profiler.profile(
+    activities=[
+        torch.profiler.ProfilerActivity.CPU,
+        torch.profiler.ProfilerActivity.CUDA,
+    ],
+    with_stack=True,
+) as prof:
+    for i, batch in enumerate(train_loader):
+        if i >= 10:
+            break
+        # ... training step ...
+
+prof.export_chrome_trace("trace.json")
+```
+
+The trace reveals large gaps between GPU kernels:
+
+```
+Timeline:
+CPU: [DataLoader]................[DataLoader]................[DataLoader]
+GPU:             [Forward][Backward]         [Forward][Backward]
+                 ^--- only 15% of time       ^--- GPU starved
+```
+
+**Step 4: Isolate data loading**
+
+```python
+# Measure data loading time
+import time
+
+times = []
+for i, batch in enumerate(train_loader):
+    start = time.time()
+    _ = batch  # Just iterate
+    times.append(time.time() - start)
+    if i >= 100:
+        break
+
+print(f"Mean batch time: {sum(times)/len(times)*1000:.1f}ms")
+print(f"Max batch time: {max(times)*1000:.1f}ms")
+
+# Result: Mean: 450ms, Max: 2100ms
+# Expected: ~50ms
+```
+
+Data loading is 9× slower than expected.
+
+**Step 5: Find the data loading bottleneck**
+
+```python
+# Profile the data loading code
+import cProfile
+import pstats
+
+with cProfile.Profile() as pr:
+    for i, batch in enumerate(train_loader):
+        if i >= 10:
+            break
+
+stats = pstats.Stats(pr)
+stats.sort_stats('cumulative')
+stats.print_stats(20)
+```
+
+Top result:
+
+```
+ncalls  tottime  cumtime  filename:lineno(function)
+  10    4.200    4.200    dataset.py:45(load_and_preprocess)
+   ↑ 420ms per sample!
+```
+
+**Step 6: Examine the suspicious code**
+
+```python
+# dataset.py:45
+def load_and_preprocess(self, path):
+    # Load image
+    img = Image.open(path)
+
+    # Resize (expensive but expected)
+    img = img.resize((224, 224))
+
+    # ← NEW: Added this week for "augmentation"
+    # Random augmentation with heavy transforms
+    if self.augment:
+        img = self.heavy_augment(img)
+
+    return self.to_tensor(img)
+
+def heavy_augment(self, img):
+    # Applies 10 sequential random transforms
+    for transform in self.random_transforms:
+        img = transform(img)  # Each one is expensive!
+    return img
+```
+
+**The Root Cause**
+
+Someone added heavy augmentation without testing performance. Each transform:
+
+1. Converts PIL image to numpy array
+2. Applies transform
+3. Converts back to PIL
+
+10 transforms × 3 conversions each = 30 unnecessary conversions per image.
+
+**The Fix**
+
+```python
+# Option 1: Batch the conversions
+def heavy_augment_fixed(self, img):
+    # Convert once
+    arr = np.array(img)
+
+    # Apply all transforms in numpy
+    for transform in self.random_transforms:
+        arr = transform(arr)
+
+    # Convert back once
+    return Image.fromarray(arr)
+
+# Option 2: Use GPU augmentation
+import kornia
+
+# Move augmentation to GPU, apply to batch
+class GPUAugment:
+    def __init__(self):
+        self.transforms = kornia.augmentation.AugmentationSequential(...)
+
+    def __call__(self, batch_tensor):
+        # All augmentations on GPU
+        return self.transforms(batch_tensor)
+```
+
+**Result**
+
+- Data loading: 450ms → 50ms per batch
+- Training throughput: 120 → 1150 samples/sec
+- Fix time: 2 hours of investigation, 20 lines of code
+
+### Lessons Learned
+
+1. **GPU utilization is the first check**: Low GPU util means you're feeding it wrong
+2. **Profile before debugging**: The trace pointed directly at data loading
+3. **Code changes are the usual suspect**: "Same code" is often not true
+4. **Conversions are expensive**: Format changes (PIL↔numpy↔tensor) add up
+
+## Case Study 2: Inference Cost Reduction
+
+### The Symptom
+
+An inference service costs $50K/month in GPU compute. Target: reduce to $25K/month without significant latency increase.
+
+### The Baseline
+
+```python
+# Current setup
+Model: LLaMA-7B
+Hardware: 8x A100 40GB
+Serving: vLLM
+Throughput: 50 requests/sec
+P99 latency: 800ms
+Cost: $50K/month
+```
+
+### Investigation Path 1: Quantization
+
+**Hypothesis**: INT8 quantization could double throughput.
+
+```python
+from transformers import AutoModelForCausalLM
+import torch
+
+# Load with INT8 quantization
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-7b",
+    load_in_8bit=True,
+    device_map="auto"
+)
+```
+
+**Results**:
+
+```
+INT8 quantization:
+- Throughput: 50 → 85 requests/sec (+70%)
+- P99 latency: 800ms → 750ms (improved!)
+- Quality: 0.1% perplexity increase (acceptable)
+```
+
+Promising, but not 2× yet.
+
+### Investigation Path 2: Batching Strategy
+
+**Hypothesis**: Larger batch sizes could improve throughput.
+
+```python
+# Profile batch size vs latency/throughput
+for batch_size in [1, 2, 4, 8, 16, 32]:
+    latency, throughput = benchmark(model, batch_size)
+    print(f"Batch {batch_size}: {throughput:.1f} req/s, {latency:.0f}ms P99")
+```
+
+**Results**:
+
+```
+Batch 1:  85 req/s, 750ms P99
+Batch 2:  140 req/s, 850ms P99
+Batch 4:  210 req/s, 950ms P99
+Batch 8:  280 req/s, 1100ms P99  ← exceeds latency budget
+Batch 16: 320 req/s, 1400ms P99
+```
+
+At batch size 4: 4.2× throughput improvement over baseline, within latency budget.
+
+### Investigation Path 3: Continuous Batching
+
+**Hypothesis**: Dynamic batching wastes less compute than static batching.
+
+```python
+# vLLM already uses continuous batching, but we can tune it
+from vllm import LLM, SamplingParams
+
+llm = LLM(
+    model="meta-llama/Llama-2-7b",
+    quantization="awq",  # Even better quantization
+    max_num_batched_tokens=8192,  # Tune for our latency budget
+    max_num_seqs=256,  # Max concurrent sequences
+)
+```
+
+**Results with AWQ + tuned continuous batching**:
+
+```
+Throughput: 50 → 350 requests/sec (7×!)
+P99 latency: 800ms → 920ms (within 1s budget)
+```
+
+### Investigation Path 4: Right-sizing Hardware
+
+**Hypothesis**: We might be over-provisioned.
+
+Current: 8× A100 40GB at $3.50/GPU/hour = $20,160/month
+
+With 7× throughput, we need:
+
+```
+Old: 50 req/s ÷ 50 req/s/8GPUs = 8 GPUs
+New: 50 req/s ÷ 350 req/s = 0.14 of our capacity
+
+# But keep some headroom for spikes
+Required: 2 GPUs (with 75% average utilization)
+```
+
+**Final Configuration**:
+
+```
+Hardware: 2× A100 40GB (down from 8)
+Model: LLaMA-7B with AWQ quantization
+Serving: vLLM with tuned batching
+Throughput: 175 req/s per GPU
+Cost: $5,040/month (90% reduction!)
+```
+
+### Summary
+
+| Change | Throughput Gain | Cumulative |
+|--------|-----------------|------------|
+| Baseline | 1× | 50 req/s |
+| INT8 quantization | 1.7× | 85 req/s |
+| Batch size 4 | 2.5× | 210 req/s |
+| AWQ + continuous batching | 1.7× | 350 req/s |
+| **Total improvement** | **7×** | |
+
+Cost reduction: $50K → $5K/month (90% savings).
+
+### Lessons Learned
+
+1. **Quantization is free throughput**: INT8/AWQ often improves speed with minimal quality loss
+2. **Batching transforms economics**: Amortizing fixed costs over more requests is powerful
+3. **Right-size after optimizing**: Optimize first, then reduce hardware
+4. **Measure P99, not average**: Average latency hides user-facing problems
+
+## Case Study 3: The Memory Leak
+
+### The Symptom
+
+Training crashes with OOM after 12 hours. Worked fine for months.
+
+### The Investigation
+
+**Step 1: Monitor memory over time**
+
+```python
+import torch
+import gc
+
+def log_memory():
+    allocated = torch.cuda.memory_allocated() / 1e9
+    reserved = torch.cuda.memory_reserved() / 1e9
+    print(f"Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
+
+# Log every 100 steps
+for step in range(num_steps):
+    train_step()
+    if step % 100 == 0:
+        log_memory()
+```
+
+**Results**:
+
+```
+Step 0:     Allocated: 8.50GB, Reserved: 10.00GB
+Step 100:   Allocated: 8.52GB, Reserved: 10.00GB
+Step 500:   Allocated: 8.80GB, Reserved: 11.00GB  ← growing
+Step 1000:  Allocated: 9.20GB, Reserved: 12.00GB
+Step 5000:  Allocated: 12.50GB, Reserved: 14.00GB
+Step 10000: OOM
+```
+
+Memory grows 4MB per step. Over 50K steps: 200GB leak.
+
+**Step 2: Identify what's growing**
+
+```python
+# Use torch's memory snapshot
+torch.cuda.memory._record_memory_history()
+
+# After some steps
+snapshot = torch.cuda.memory._snapshot()
+
+# Export for visualization
+with open("memory_snapshot.pickle", "wb") as f:
+    pickle.dump(snapshot, f)
+
+# View with: python -m torch.cuda.memory_viz snapshot
+```
+
+The snapshot shows growing number of gradient tensors.
+
+**Step 3: Find the gradient accumulation**
+
+```python
+# Check if tensors are being retained
+def check_grad_graph():
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            if param.grad.grad_fn is not None:
+                print(f"LEAK: {name} has grad with history")
+
+# Run after backward
+loss.backward()
+check_grad_graph()
+```
+
+**Result**:
+
+```
+LEAK: transformer.layer.0.attention.query.weight has grad with history
+LEAK: transformer.layer.0.attention.key.weight has grad with history
+...
+```
+
+Gradients are retaining computation history.
+
+**Step 4: Find the culprit**
+
+Recent code change search:
+
+```python
+# Someone added gradient clipping like this:
+for param in model.parameters():
+    if param.grad is not None:
+        param.grad = torch.clamp(param.grad, -1, 1)  # BUG!
+```
+
+**The Problem**
+
+`torch.clamp` is a differentiable operation. When you assign its output to `param.grad`, you create a new tensor with computation history. That history keeps old gradients alive.
+
+**The Fix**
+
+```python
+# Use in-place clipping
+for param in model.parameters():
+    if param.grad is not None:
+        param.grad.clamp_(-1, 1)  # In-place: no new tensor
+
+# Or use the built-in function
+torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+```
+
+**Step 5: Verify the fix**
+
+```python
+# After fix:
+Step 0:     Allocated: 8.50GB
+Step 1000:  Allocated: 8.50GB
+Step 10000: Allocated: 8.50GB  ✓ Stable
+```
+
+### Lessons Learned
+
+1. **Memory should be constant**: Training memory shouldn't grow over time
+2. **In-place operations don't create history**: Use `_` suffix methods for gradients
+3. **Record memory history for debugging**: PyTorch's memory tools are powerful
+4. **Review gradient-touching code carefully**: It's easy to accidentally retain graphs
+
+## Case Study 4: Distributed Training Scaling
+
+### The Symptom
+
+Training on 8 GPUs is only 4× faster than 1 GPU, not 8×.
+
+### The Investigation
+
+**Step 1: Measure scaling**
+
+```python
+# Benchmark throughput at different scales
+for num_gpus in [1, 2, 4, 8]:
+    throughput = run_benchmark(num_gpus)
+    efficiency = throughput / (num_gpus * single_gpu_throughput)
+    print(f"{num_gpus} GPUs: {throughput:.0f} samples/s ({efficiency:.1%} efficiency)")
+```
+
+**Results**:
+
+```
+1 GPU:  1000 samples/s (100% efficiency)
+2 GPUs: 1800 samples/s (90% efficiency)
+4 GPUs: 3200 samples/s (80% efficiency)
+8 GPUs: 4000 samples/s (50% efficiency) ← Problem here
+```
+
+Significant efficiency drop at 8 GPUs.
+
+**Step 2: Profile communication**
+
+```python
+# Use PyTorch profiler with NCCL tracing
+with torch.profiler.profile(
+    activities=[
+        torch.profiler.ProfilerActivity.CPU,
+        torch.profiler.ProfilerActivity.CUDA,
+    ],
+    record_shapes=True,
+) as prof:
+    train_step()
+
+# Look for collective operations
+for event in prof.key_averages():
+    if "nccl" in event.key.lower():
+        print(f"{event.key}: {event.cuda_time_total/1000:.1f}ms")
+```
+
+**Results**:
+
+```
+ncclAllReduce: 450ms per step  ← 45% of step time!
+Compute: 550ms per step
+```
+
+Communication is the bottleneck.
+
+**Step 3: Analyze communication pattern**
+
+```python
+# Check gradient sizes
+total_params = sum(p.numel() for p in model.parameters())
+print(f"Total parameters: {total_params:,}")
+print(f"Gradient size: {total_params * 4 / 1e9:.2f} GB")
+
+# Per-step communication (all-reduce sends 2× gradient size)
+print(f"Data per step: {total_params * 4 * 2 / 1e9:.2f} GB")
+```
+
+**Results**:
+
+```
+Total parameters: 1,000,000,000
+Gradient size: 4.0 GB
+Data per step: 8.0 GB
+```
+
+Sending 8GB per step across 8 GPUs with limited interconnect bandwidth.
+
+**Step 4: Check interconnect**
+
+```bash
+nvidia-smi topo -m
+```
+
+**Result**:
+
+```
+        GPU0    GPU1    GPU2    GPU3    GPU4    GPU5    GPU6    GPU7
+GPU0     X      NV4     NV4     NV4     SYS     SYS     SYS     SYS
+GPU1    NV4      X      NV4     NV4     SYS     SYS     SYS     SYS
+...
+```
+
+GPUs 0-3 have NVLink (fast), but GPUs 4-7 communicate via PCIe (slow).
+
+**Step 5: Apply fixes**
+
+**Fix 1: Gradient compression**
+
+```python
+# Use PowerSGD for gradient compression
+from torch.distributed.algorithms.ddp_comm_hooks import powerSGD_hook
+
+model = DDP(model)
+model.register_comm_hook(
+    state=powerSGD_hook.PowerSGDState(
+        process_group=dist.group.WORLD,
+        matrix_approximation_rank=32,  # Compress to rank 32
+    ),
+    hook=powerSGD_hook.powerSGD_hook,
+)
+```
+
+**Fix 2: Overlap computation and communication**
+
+```python
+# Already default in DDP, but verify it's enabled
+model = DDP(
+    model,
+    gradient_as_bucket_view=True,
+    static_graph=True,  # Enable additional optimizations
+)
+```
+
+**Fix 3: Use better topology-aware placement**
+
+```python
+# Group processes by NVLink connectivity
+# Train two data-parallel groups of 4 GPUs each
+# Each group has full NVLink connectivity
+```
+
+**Results after fixes**:
+
+```
+Before fixes:
+8 GPUs: 4000 samples/s (50% efficiency)
+AllReduce: 450ms/step
+
+After fixes:
+8 GPUs: 6800 samples/s (85% efficiency)
+AllReduce: 180ms/step (60% reduction)
+```
+
+### Lessons Learned
+
+1. **Communication often limits scaling**: Profile communication separately from compute
+2. **Topology matters**: NVLink vs PCIe is a 10× bandwidth difference
+3. **Compression helps**: PowerSGD and similar techniques reduce communication
+4. **Overlap is essential**: Never let GPUs wait for communication if avoidable
+
+## Setting Up Continuous Performance Monitoring
+
+### The Problem with Ad-Hoc Profiling
+
+Profiling when things are slow misses the regression point. You need continuous monitoring.
+
+### Basic Throughput Tracking
+
+```python
+import time
+import wandb  # or your logging system
+
+class PerformanceTracker:
+    def __init__(self, log_every_n_steps=100):
+        self.log_every = log_every_n_steps
+        self.step_times = []
+        self.step_count = 0
+
+    def step_start(self):
+        self.start_time = time.perf_counter()
+
+    def step_end(self, batch_size):
+        elapsed = time.perf_counter() - self.start_time
+        self.step_times.append(elapsed)
+        self.step_count += 1
+
+        if self.step_count % self.log_every == 0:
+            recent_times = self.step_times[-self.log_every:]
+            avg_time = sum(recent_times) / len(recent_times)
+            throughput = batch_size / avg_time
+
+            wandb.log({
+                "perf/step_time_ms": avg_time * 1000,
+                "perf/throughput_samples_sec": throughput,
+                "perf/gpu_memory_gb": torch.cuda.max_memory_allocated() / 1e9,
+            })
+```
+
+### Detecting Regressions
+
+```python
+class RegressionDetector:
+    def __init__(self, baseline_throughput, threshold=0.2):
+        self.baseline = baseline_throughput
+        self.threshold = threshold  # 20% regression triggers alert
+
+    def check(self, current_throughput):
+        regression = (self.baseline - current_throughput) / self.baseline
+
+        if regression > self.threshold:
+            self.alert(f"Performance regression: {regression:.1%} slowdown")
+
+    def alert(self, message):
+        # Send to Slack, PagerDuty, etc.
+        print(f"ALERT: {message}")
+```
+
+### Integration with CI/CD
+
+```yaml
+# .github/workflows/performance.yml
+name: Performance Tests
+
+on: [push]
+
+jobs:
+  benchmark:
+    runs-on: [self-hosted, gpu]
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run benchmarks
+        run: python benchmark.py --output results.json
+
+      - name: Check for regressions
+        run: |
+          python check_regression.py \
+            --current results.json \
+            --baseline baseline.json \
+            --threshold 0.1
+```
+
+## Key Takeaways
+
+1. **Start with utilization metrics**: Low GPU util points to feeding problems
+2. **Profile before optimizing**: Find the bottleneck, don't guess
+3. **Check recent changes**: Most regressions come from recent code
+4. **Memory should be constant**: Growing memory means a leak
+5. **Communication scales poorly**: Design for minimal cross-device data movement
+6. **Monitor continuously**: Catch regressions early with automated tracking
+
+## Connection to Other Chapters
+
+- **Chapter 19 (Profiling Tools)**: The specific tools used in these investigations
+- **Chapter 13 (Distributed Training)**: Theoretical background for scaling issues
+- **Chapter 15 (Measurement)**: The scientific method applied to debugging
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook provides:
+
+- Synthetic reproduction of each case study
+- Templates for continuous performance monitoring
+- Regression detection framework
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/23-production-cases.ipynb)
+:::
+
+## Further Reading
+
+- [PyTorch Performance Tuning Guide](https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html)
+- [NVIDIA Deep Learning Performance Guide](https://docs.nvidia.com/deeplearning/performance/)
+- [vLLM: High-throughput LLM Serving](https://github.com/vllm-project/vllm) - Production inference optimization
