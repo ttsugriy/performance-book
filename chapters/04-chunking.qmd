@@ -11,6 +11,14 @@ The naive approach: load all billion into memory, sum them, divide.
 The problem: a billion float64s is 8 GB. What if you only have 1 GB of RAM?
 :::
 
+::: {.callout-tip}
+## Historical Note: Egyptian Multiplication (2000 BCE)
+
+The exploitation of associativity for efficiency dates back four millennia. Egyptian scribes computed multiplication using repeated doubling—O(log n) operations instead of O(n) additions. Their insight: because addition is associative, you can regroup (8+4+1)×24 into 8×24 + 4×24 + 1×24, computing each term via doubling.
+
+This is the same principle behind parallel scan, distributed reduction, and FlashAttention's streaming softmax. The algorithm is ancient; the scale is modern.
+:::
+
 ## The Property That Enables Everything
 
 Some operations can be computed in any order:

@@ -11,6 +11,14 @@ But there's a fourth, hidden in plain sight. The most universal.
 **Locality**: The property that makes all the others practical.
 :::
 
+::: {.callout-tip}
+## Historical Note: Cache-Oblivious Algorithms (1999)
+
+The formal study of locality in algorithms took a leap forward with Frigo, Leiserson, Prokop, and Ramachandran's 1999 paper introducing **cache-oblivious algorithms**. Their key insight: recursive divide-and-conquer algorithms automatically achieve good cache behavior at *all* levels of the memory hierarchy—without knowing cache sizes.
+
+This formalized what systems programmers knew intuitively: algorithms that work on nearby data at each step of recursion naturally exploit whatever fast memory exists.
+:::
+
 ## The Cache Hierarchy Reality
 
 In Chapter 1, we saw the memory hierarchy:

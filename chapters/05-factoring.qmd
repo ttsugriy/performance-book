@@ -9,6 +9,16 @@ Take a 70-billion-parameter model. Fine-tune it on your task.
 The update to the weights could require 70 billion numbers. But what if it only *needs* a few million?
 :::
 
+::: {.callout-tip}
+## Historical Note: Fourier and the Separation of Variables (1807)
+
+Joseph Fourier's insight that complex signals decompose into simple sinusoids was the first great triumph of separability. Any function can be written as a sum of independent basis functions—separation of variables.
+
+A century later, the Singular Value Decomposition (SVD) generalized this: any matrix can be decomposed into rank-1 components. When most singular values are small, the matrix is "effectively low-rank"—the structure that LoRA exploits.
+
+From Fourier to LoRA: the principle that complex structures often hide simple, separable cores.
+:::
+
 ## The Bet on Structure
 
 Chapter 4 showed how associativity lets us chunk, stream, and parallelize. This chapter explores a different property: **separability**.

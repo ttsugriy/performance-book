@@ -11,6 +11,14 @@ A matrix is 90% zeros. Shouldn't we be 10× faster?
 Usually not. And understanding why reveals deep truths about hardware.
 :::
 
+::: {.callout-tip}
+## Historical Note: Sparse Matrix Computation (1960s)
+
+The systematic study of sparse computation began with solving large systems of linear equations arising from physical simulations. Engineers noticed that most coefficients were zero—the matrix structure mirrored the physical locality of interactions.
+
+The key insight: exploiting sparsity requires *structure*, not just zeros. Random sparsity doesn't help; structured sparsity (banded, block-diagonal, graph-based) enables specialized algorithms. This lesson applies directly to modern ML: structured sparsity (e.g., 2:4 patterns for tensor cores) wins where random sparsity fails.
+:::
+
 ## The Sparsity Paradox
 
 Sparsity is everywhere:
