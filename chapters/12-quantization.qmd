@@ -809,30 +809,40 @@ QAT (Quantization-Aware Training):
 
 ## Choosing the Right Method
 
+```{mermaid}
+%%| fig-cap: "Decision tree for choosing a quantization method"
+flowchart TD
+    A[Start] --> B{Need < 2 bits?}
+    B -->|Yes| C[AQLM or QAT]
+    B -->|No| D{Have calibration data?}
+    D -->|No| E[HQQ<br/>zero-shot]
+    D -->|Yes| F{Target platform?}
+    F -->|CPU/Mac| G[GGUF<br/>llama.cpp]
+    F -->|AMD GPU| H[GGUF or AWQ]
+    F -->|NVIDIA GPU| I{Quality sensitivity?}
+    I -->|High| J[AWQ or GPTQ<br/>group_size=32]
+    I -->|Medium| K[GPTQ<br/>group_size=128]
+    I -->|Low| L[GPTQ<br/>group_size=-1]
+
+    style C fill:#e0f2fe,stroke:#0284c7
+    style E fill:#fef3c7,stroke:#d97706
+    style G fill:#dcfce7,stroke:#16a34a
+    style H fill:#dcfce7,stroke:#16a34a
+    style J fill:#f3e8ff,stroke:#9333ea
+    style K fill:#f3e8ff,stroke:#9333ea
+    style L fill:#f3e8ff,stroke:#9333ea
 ```
-Decision tree for quantization method:
 
-Need <2 bits?
-  └─ Yes → AQLM or QAT
-  └─ No → Continue
+For memory-constrained scenarios:
 
-Have calibration data?
-  └─ No → HQQ (zero-shot)
-  └─ Yes → Continue
+```{mermaid}
+%%| fig-cap: "Memory-constrained quantization choices"
+flowchart LR
+    A{Memory extremely limited?} -->|Yes| B[SpQR 3-bit<br/>or AQLM 2-bit]
+    A -->|No| C[AWQ or GPTQ<br/>4-bit]
 
-Target platform?
-  └─ CPU/Mac → GGUF (llama.cpp)
-  └─ NVIDIA GPU → Continue
-  └─ AMD GPU → GGUF or AWQ
-
-Quality sensitivity?
-  └─ High → AWQ or GPTQ with group_size=32
-  └─ Medium → GPTQ with group_size=128
-  └─ Low → GPTQ with group_size=-1 (per-tensor)
-
-Memory extremely limited?
-  └─ Yes → SpQR (3-bit) or AQLM (2-bit)
-  └─ No → AWQ or GPTQ (4-bit)
+    style B fill:#fee2e2,stroke:#dc2626
+    style C fill:#dcfce7,stroke:#16a34a
 ```
 
 ## Connections

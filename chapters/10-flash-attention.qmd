@@ -935,20 +935,32 @@ Theoretical peak: 989 TFLOPS (FP16), 1979 TFLOPS (FP8)
 
 ### When to Use Each Version
 
-```
-FA1: Legacy systems, non-NVIDIA hardware
-FA2: A100 and earlier, production stability
-FA3: H100/H200, maximum performance
+```{mermaid}
+%%| fig-cap: "Choosing the right FlashAttention version"
+flowchart TD
+    A{Hardware?} -->|Hopper H100/H200| B[FA3]
+    A -->|Ampere A100| C[FA2]
+    A -->|Older/Non-NVIDIA| D[FA1 or PyTorch SDPA]
 
-Decision tree:
-├── Hardware = Hopper (H100/H200)?
-│   ├── Yes → FA3
-│   │         ├── Need FP16 accuracy? → FA3 FP16
-│   │         └── Can tolerate FP8? → FA3 FP8 (2× faster)
-│   └── No → FA2
-│             ├── Hardware = Ampere (A100)? → FA2
-│             └── Older? → FA1 or PyTorch SDPA
+    B --> E{Precision requirement?}
+    E -->|Need FP16 accuracy| F[FA3 FP16]
+    E -->|Can tolerate FP8| G[FA3 FP8<br/>2× faster]
+
+    style B fill:#dcfce7,stroke:#16a34a
+    style C fill:#e0f2fe,stroke:#0284c7
+    style D fill:#fef3c7,stroke:#d97706
+    style F fill:#f3e8ff,stroke:#9333ea
+    style G fill:#dcfce7,stroke:#16a34a
 ```
+
+**Quick reference:**
+
+| Version | Hardware | Best For |
+|---------|----------|----------|
+| FA1 | Legacy, non-NVIDIA | Compatibility |
+| FA2 | A100 and earlier | Production stability |
+| FA3 FP16 | H100/H200 | Maximum quality |
+| FA3 FP8 | H100/H200 | Maximum speed |
 
 ### Using FlashAttention-3
 
