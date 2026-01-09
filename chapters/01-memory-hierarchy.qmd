@@ -80,6 +80,111 @@ The RAM model says these are all "O(1)." The machine disagrees.
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+::: {.callout-note}
+## Interactive: Memory Hierarchy Explorer
+
+Adjust the data size to see where it fits in the memory hierarchy, and understand the performance implications.
+
+```{ojs}
+//| echo: false
+
+viewof dataSize = Inputs.range([1, 10000], {
+  value: 100,
+  step: 1,
+  label: "Data Size (KB)",
+  transform: Math.log
+})
+
+viewof elementSize = Inputs.select([1, 4, 8, 16], {
+  value: 8,
+  label: "Element Size (bytes)"
+})
+
+// Memory hierarchy levels (typical modern CPU)
+levels = [
+  { name: "L1 Cache", size: 64, latency: 1, color: "#22c55e" },
+  { name: "L2 Cache", size: 512, latency: 4, color: "#84cc16" },
+  { name: "L3 Cache", size: 32768, latency: 12, color: "#eab308" },
+  { name: "DRAM", size: 32 * 1024 * 1024, latency: 100, color: "#f97316" },
+  { name: "SSD", size: 1024 * 1024 * 1024, latency: 100000, color: "#ef4444" }
+]
+
+// Find which level the data fits in
+fitsIn = {
+  for (let level of levels) {
+    if (dataSize <= level.size) return level;
+  }
+  return levels[levels.length - 1];
+}
+
+// Calculate metrics
+numElements = Math.floor(dataSize * 1024 / elementSize)
+effectiveLatency = fitsIn.latency
+throughputRatio = levels[0].latency / fitsIn.latency
+
+html`
+<div style="font-family: system-ui; padding: 1.5rem; background: linear-gradient(135deg, #1e293b 0%, #334155 100%); border-radius: 12px; color: white;">
+
+  <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 1.5rem;">
+    ${levels.map(l => html`
+      <div style="
+        padding: 12px 8px;
+        border-radius: 8px;
+        text-align: center;
+        background: ${dataSize <= l.size ? l.color : '#475569'};
+        opacity: ${dataSize <= l.size ? 1 : 0.5};
+        transition: all 0.3s ease;
+      ">
+        <div style="font-weight: bold; font-size: 0.75rem;">${l.name}</div>
+        <div style="font-size: 0.65rem; opacity: 0.8;">${l.size >= 1024 ? (l.size >= 1048576 ? (l.size/1048576).toFixed(0) + ' GB' : (l.size/1024).toFixed(0) + ' MB') : l.size + ' KB'}</div>
+        <div style="font-size: 0.65rem; opacity: 0.8;">${l.latency >= 1000 ? (l.latency/1000).toFixed(0) + ' μs' : l.latency + ' ns'}</div>
+      </div>
+    `)}
+  </div>
+
+  <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div>
+        <div style="font-size: 0.75rem; opacity: 0.7;">Data Size</div>
+        <div style="font-size: 1.25rem; font-weight: bold;">${dataSize >= 1024 ? (dataSize/1024).toFixed(1) + ' MB' : dataSize.toFixed(0) + ' KB'}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; opacity: 0.7;">Elements</div>
+        <div style="font-size: 1.25rem; font-weight: bold;">${numElements.toLocaleString()}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; opacity: 0.7;">Fits In</div>
+        <div style="font-size: 1.25rem; font-weight: bold; color: ${fitsIn.color};">${fitsIn.name}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; opacity: 0.7;">Access Latency</div>
+        <div style="font-size: 1.25rem; font-weight: bold;">${fitsIn.latency >= 1000 ? (fitsIn.latency/1000).toFixed(0) + ' μs' : fitsIn.latency + ' ns'}</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding: 0.75rem; border-radius: 8px; background: ${fitsIn === levels[0] ? 'rgba(34, 197, 94, 0.2)' : fitsIn === levels[levels.length-1] ? 'rgba(239, 68, 68, 0.2)' : 'rgba(234, 179, 8, 0.2)'};">
+    <div style="font-size: 0.875rem;">
+      ${fitsIn === levels[0]
+        ? "✅ Optimal! Your working set fits in L1 cache. Expect maximum performance."
+        : fitsIn === levels[1]
+        ? "👍 Good. L2 cache access adds ~3ns latency per access."
+        : fitsIn === levels[2]
+        ? "⚠️ L3 cache. Consider tiling to improve locality. ~10× slower than L1."
+        : fitsIn === levels[3]
+        ? "🔴 DRAM access. This is the memory wall. ~100× slower than L1. Restructure for better locality."
+        : "❌ Data doesn't fit in RAM. You need streaming or out-of-core algorithms."}
+    </div>
+  </div>
+
+  <div style="margin-top: 1rem; font-size: 0.75rem; opacity: 0.6; text-align: center;">
+    Relative throughput vs L1: ${(throughputRatio * 100).toFixed(1)}%
+  </div>
+</div>
+`
+```
+:::
+
 ## Why the Hierarchy Exists
 
 The memory hierarchy isn't an accident. It's a response to a fundamental physical constraint: **the speed of light**.

@@ -303,6 +303,200 @@ Step 3: Continue pattern...
 
 This is the basis of GPU parallel scan, enabling O(log n) depth with O(n) work.
 
+::: {.callout-tip collapse="true"}
+## Interactive: Parallel Scan Visualization
+
+Visualize how parallel scan (prefix sum) uses associativity to achieve O(log n) parallel depth. Click "Step" to advance through the algorithm, or use "Auto" to animate.
+
+```{ojs}
+//| echo: false
+
+viewof numElements = Inputs.range([4, 16], {
+  value: 8,
+  step: 1,
+  label: "Number of Elements"
+})
+
+viewof scanStep = Inputs.range([0, Math.ceil(Math.log2(numElements)) * 2], {
+  value: 0,
+  step: 1,
+  label: "Algorithm Step"
+})
+
+viewof resetBtn = Inputs.button("Reset")
+```
+
+```{ojs}
+//| echo: false
+
+// Initialize values
+initialValues = Array.from({length: numElements}, (_, i) => i + 1)
+
+// Compute prefix sum at each step
+// Up-sweep phase: steps 0 to log2(n)-1
+// Down-sweep phase: steps log2(n) to 2*log2(n)-1
+numSteps = Math.ceil(Math.log2(numElements))
+totalSteps = numSteps * 2
+
+computeScanState = (step) => {
+  let values = [...initialValues]
+  let highlights = []
+  let phase = "initial"
+  let description = "Initial values"
+
+  if (step === 0) {
+    return { values, highlights, phase, description }
+  }
+
+  // Up-sweep (reduce) phase
+  if (step <= numSteps) {
+    phase = "up-sweep"
+    for (let s = 1; s <= step; s++) {
+      let stride = Math.pow(2, s)
+      for (let i = stride - 1; i < numElements; i += stride) {
+        let prevIdx = i - stride / 2
+        if (prevIdx >= 0) {
+          values[i] = values[i] + values[prevIdx]
+        }
+      }
+    }
+    // Highlight current step
+    let stride = Math.pow(2, step)
+    for (let i = stride - 1; i < numElements; i += stride) {
+      let prevIdx = i - stride / 2
+      if (prevIdx >= 0) {
+        highlights.push({ from: prevIdx, to: i })
+      }
+    }
+    description = `Up-sweep step ${step}: combining elements with stride ${stride}`
+  } else {
+    // First complete up-sweep
+    for (let s = 1; s <= numSteps; s++) {
+      let stride = Math.pow(2, s)
+      for (let i = stride - 1; i < numElements; i += stride) {
+        let prevIdx = i - stride / 2
+        if (prevIdx >= 0) {
+          values[i] = values[i] + values[prevIdx]
+        }
+      }
+    }
+
+    // Down-sweep phase
+    phase = "down-sweep"
+    let downStep = step - numSteps
+
+    // Set last to 0 and propagate
+    values[numElements - 1] = 0
+
+    for (let s = 1; s <= downStep; s++) {
+      let stride = Math.pow(2, numSteps - s + 1)
+      for (let i = stride - 1; i < numElements; i += stride) {
+        let prevIdx = i - stride / 2
+        if (prevIdx >= 0) {
+          let temp = values[prevIdx]
+          values[prevIdx] = values[i]
+          values[i] = values[i] + temp
+        }
+      }
+    }
+
+    // Highlight current down-sweep step
+    let stride = Math.pow(2, numSteps - downStep + 1)
+    for (let i = stride - 1; i < numElements; i += stride) {
+      let prevIdx = i - stride / 2
+      if (prevIdx >= 0) {
+        highlights.push({ from: i, to: prevIdx })
+      }
+    }
+    description = `Down-sweep step ${downStep}: distributing partial sums`
+  }
+
+  return { values, highlights, phase, description }
+}
+
+scanState = computeScanState(Math.min(scanStep, totalSteps))
+
+// Expected prefix sum (exclusive)
+expectedPrefix = initialValues.reduce((acc, val, idx) => {
+  if (idx === 0) return [0]
+  return [...acc, acc[acc.length - 1] + initialValues[idx - 1]]
+}, [])
+```
+
+```{ojs}
+//| echo: false
+
+html`<div style="margin: 20px 0;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+    <div>
+      <span style="padding: 4px 12px; border-radius: 20px; font-size: 0.85em; font-weight: 500;
+        background: ${scanState.phase === 'initial' ? '#e5e7eb' : scanState.phase === 'up-sweep' ? '#fef3c7' : '#d1fae5'};
+        color: ${scanState.phase === 'initial' ? '#374151' : scanState.phase === 'up-sweep' ? '#92400e' : '#065f46'};">
+        ${scanState.phase === 'initial' ? 'Initial' : scanState.phase === 'up-sweep' ? 'Up-Sweep (Reduce)' : 'Down-Sweep (Distribute)'}
+      </span>
+    </div>
+    <div style="font-size: 0.85em; color: #666;">
+      Step ${scanStep} of ${totalSteps}
+    </div>
+  </div>
+
+  <div style="margin-bottom: 10px; font-size: 0.9em; color: #374151; font-style: italic;">
+    ${scanState.description}
+  </div>
+
+  <div style="display: flex; gap: 8px; justify-content: center; margin: 20px 0; position: relative;">
+    ${scanState.values.map((val, i) => {
+      const isHighlightTo = scanState.highlights.some(h => h.to === i)
+      const isHighlightFrom = scanState.highlights.some(h => h.from === i)
+      return html`<div style="
+        width: 50px; height: 50px;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 8px; font-weight: bold; font-size: 1.1em;
+        background: ${isHighlightTo ? '#fbbf24' : isHighlightFrom ? '#86efac' : '#e5e7eb'};
+        border: 2px solid ${isHighlightTo ? '#d97706' : isHighlightFrom ? '#22c55e' : '#9ca3af'};
+        color: ${isHighlightTo || isHighlightFrom ? '#1f2937' : '#374151'};
+        transition: all 0.3s ease;
+      ">${val}</div>`
+    })}
+  </div>
+
+  <div style="display: flex; gap: 8px; justify-content: center; margin-top: 30px;">
+    <div style="text-align: center;">
+      <div style="font-size: 0.75em; color: #666; margin-bottom: 5px;">Input</div>
+      <div style="display: flex; gap: 4px;">
+        ${initialValues.map(v => html`<div style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; background: #f3f4f6; border-radius: 4px; font-size: 0.8em;">${v}</div>`)}
+      </div>
+    </div>
+  </div>
+
+  ${scanStep >= totalSteps ? html`
+    <div style="margin-top: 20px; padding: 15px; background: #d1fae5; border-radius: 8px; text-align: center;">
+      <div style="font-weight: bold; color: #065f46; margin-bottom: 5px;">Complete! Exclusive prefix sum computed</div>
+      <div style="font-size: 0.85em; color: #047857;">
+        Input: [${initialValues.join(', ')}] → Output: [${scanState.values.join(', ')}]
+      </div>
+      <div style="font-size: 0.8em; color: #059669; margin-top: 5px;">
+        O(n) work, O(log n) depth — ${numSteps} parallel steps instead of ${numElements - 1} sequential
+      </div>
+    </div>
+  ` : ''}
+</div>
+
+<div style="margin-top: 20px; padding: 15px; background: #f9fafb; border-radius: 8px;">
+  <div style="font-size: 0.85em; color: #4b5563;">
+    <strong>Legend:</strong>
+    <span style="margin-left: 15px;">🟡 Yellow = target (receives sum)</span>
+    <span style="margin-left: 15px;">🟢 Green = source (adds to target)</span>
+  </div>
+  <div style="font-size: 0.8em; color: #6b7280; margin-top: 8px;">
+    The Blelloch scan algorithm performs two phases: up-sweep builds a reduction tree, down-sweep distributes partial sums. Total: 2·log₂(n) parallel steps.
+  </div>
+</div>`
+```
+
+**Key insight:** Because addition is associative, we can reorder the computation. Instead of n-1 sequential adds, we use O(log n) parallel rounds. The up-sweep computes partial sums; the down-sweep distributes them—all enabled by the freedom to regroup.
+:::
+
 ## When Associativity Breaks
 
 Not everything associates. Recognize these cases:

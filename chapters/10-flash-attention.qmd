@@ -43,6 +43,139 @@ Per layer. Per head. Per batch element.
 
 An 80GB A100 runs out of memory quickly.
 
+::: {.callout-tip collapse="true"}
+## Interactive: FlashAttention Memory Explorer
+
+Explore how FlashAttention reduces memory usage compared to standard attention. Adjust the sequence length and tile size to see how memory requirements scale.
+
+```{ojs}
+//| echo: false
+
+viewof seqLength = Inputs.range([256, 65536], {
+  value: 8192,
+  step: 256,
+  label: "Sequence Length (n)",
+  transform: x => Math.round(x)
+})
+
+viewof headDim = Inputs.select([32, 64, 128, 256], {
+  value: 64,
+  label: "Head Dimension (d)"
+})
+
+viewof tileSize = Inputs.range([16, 256], {
+  value: 128,
+  step: 16,
+  label: "Tile Size",
+  transform: x => Math.round(x)
+})
+
+viewof precision = Inputs.radio(["FP32", "FP16", "FP8"], {
+  value: "FP16",
+  label: "Precision"
+})
+```
+
+```{ojs}
+//| echo: false
+
+bytesPerElement = precision === "FP32" ? 4 : precision === "FP16" ? 2 : 1
+
+// Standard attention memory
+standardS = seqLength * seqLength * bytesPerElement  // S = Q @ K.T
+standardP = seqLength * seqLength * bytesPerElement  // P = softmax(S)
+standardTotal = standardS + standardP
+
+// FlashAttention memory
+flashSTile = tileSize * tileSize * bytesPerElement    // S_tile
+flashQTile = tileSize * headDim * bytesPerElement     // Q_tile
+flashKTile = tileSize * headDim * bytesPerElement     // K_tile
+flashVTile = tileSize * headDim * bytesPerElement     // V_tile
+flashAccum = tileSize * headDim * 4                   // Accumulators (always FP32)
+flashStats = seqLength * 4 * 2                        // M and L arrays (FP32)
+flashTotal = flashSTile + flashQTile + flashKTile + flashVTile + flashAccum + flashStats
+
+memoryReduction = standardTotal / flashTotal
+```
+
+```{ojs}
+//| echo: false
+
+formatBytes = (bytes) => {
+  if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + " GB"
+  if (bytes >= 1e6) return (bytes / 1e6).toFixed(2) + " MB"
+  if (bytes >= 1e3) return (bytes / 1e3).toFixed(2) + " KB"
+  return bytes + " B"
+}
+
+html`<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
+  <div style="background: linear-gradient(135deg, #fee2e2, #fecaca); padding: 20px; border-radius: 12px; border-left: 4px solid #ef4444;">
+    <h4 style="margin: 0 0 15px 0; color: #b91c1c;">Standard Attention</h4>
+    <div style="font-size: 1.8em; font-weight: bold; color: #dc2626; margin-bottom: 10px;">
+      ${formatBytes(standardTotal)}
+    </div>
+    <div style="font-size: 0.85em; color: #7f1d1d;">
+      <div>S matrix (n×n): ${formatBytes(standardS)}</div>
+      <div>P matrix (n×n): ${formatBytes(standardP)}</div>
+    </div>
+    ${standardTotal > 80e9 ? html`<div style="margin-top: 10px; padding: 8px; background: #dc2626; color: white; border-radius: 6px; font-weight: bold;">⚠️ Exceeds A100 80GB!</div>` : ""}
+  </div>
+
+  <div style="background: linear-gradient(135deg, #dcfce7, #bbf7d0); padding: 20px; border-radius: 12px; border-left: 4px solid #22c55e;">
+    <h4 style="margin: 0 0 15px 0; color: #15803d;">FlashAttention</h4>
+    <div style="font-size: 1.8em; font-weight: bold; color: #16a34a; margin-bottom: 10px;">
+      ${formatBytes(flashTotal)}
+    </div>
+    <div style="font-size: 0.85em; color: #14532d;">
+      <div>S_tile (${tileSize}×${tileSize}): ${formatBytes(flashSTile)}</div>
+      <div>Q/K/V tiles: ${formatBytes(flashQTile + flashKTile + flashVTile)}</div>
+      <div>Accumulators: ${formatBytes(flashAccum)}</div>
+      <div>Statistics (M, L): ${formatBytes(flashStats)}</div>
+    </div>
+  </div>
+</div>
+
+<div style="background: linear-gradient(135deg, #f0f9ff, #e0f2fe); padding: 20px; border-radius: 12px; text-align: center; margin-top: 10px;">
+  <div style="font-size: 0.9em; color: #0369a1; margin-bottom: 5px;">Memory Reduction</div>
+  <div style="font-size: 2.5em; font-weight: bold; color: #0284c7;">${memoryReduction.toFixed(0)}×</div>
+  <div style="font-size: 0.85em; color: #0c4a6e; margin-top: 5px;">
+    From O(n²) to O(tile² + n·d)
+  </div>
+</div>`
+```
+
+```{ojs}
+//| echo: false
+
+// Visualization of the tiling pattern
+numQTiles = Math.ceil(seqLength / tileSize)
+numKVTiles = Math.ceil(seqLength / tileSize)
+
+html`<div style="margin-top: 20px;">
+  <h5 style="margin-bottom: 10px;">Tiling Pattern</h5>
+  <div style="display: flex; gap: 30px; align-items: flex-start;">
+    <div>
+      <div style="font-size: 0.8em; color: #666; margin-bottom: 5px;">Standard: One ${seqLength}×${seqLength} matrix</div>
+      <div style="width: 100px; height: 100px; background: linear-gradient(135deg, #fecaca, #ef4444); border: 2px solid #dc2626; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.75em;">
+        ${seqLength}×${seqLength}
+      </div>
+    </div>
+    <div>
+      <div style="font-size: 0.8em; color: #666; margin-bottom: 5px;">FlashAttention: ${numQTiles}×${numKVTiles} tiles of ${tileSize}×${tileSize}</div>
+      <div style="display: grid; grid-template-columns: repeat(${Math.min(numKVTiles, 8)}, 12px); gap: 1px; max-width: 150px;">
+        ${Array.from({length: Math.min(numQTiles * numKVTiles, 64)}, (_, i) =>
+          html`<div style="width: 12px; height: 12px; background: #22c55e; border-radius: 2px; opacity: ${0.3 + 0.7 * Math.random()};"></div>`
+        )}
+        ${numQTiles * numKVTiles > 64 ? html`<div style="grid-column: 1 / -1; font-size: 0.7em; color: #666; text-align: center; margin-top: 5px;">... and ${numQTiles * numKVTiles - 64} more tiles</div>` : ""}
+      </div>
+    </div>
+  </div>
+</div>`
+```
+
+**Key insight:** FlashAttention processes small tiles that fit in SRAM (shared memory), avoiding the O(n²) HBM memory footprint. The total memory is dominated by the O(n·d) output and statistics, not the attention matrix.
+:::
+
 ## The Question
 
 Here's the question that leads to FlashAttention:

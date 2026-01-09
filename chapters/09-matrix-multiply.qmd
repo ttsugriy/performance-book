@@ -248,6 +248,165 @@ B[k,j] read (M/T) times, stored once → reuse = M/T = 32×
 
 Effective data movement drops by ~32×. We're no longer memory-bound.
 
+::: {.callout-tip collapse="true"}
+## Interactive: Tiled Matrix Multiply Visualizer
+
+Explore how tiling enables data reuse. Adjust matrix and tile sizes to see how working set and reuse factor change.
+
+```{ojs}
+//| echo: false
+
+viewof matrixSize = Inputs.range([256, 4096], {
+  value: 2048,
+  step: 256,
+  label: "Matrix Size (N×N)"
+})
+
+viewof tileSizeMatmul = Inputs.range([16, 256], {
+  value: 64,
+  step: 16,
+  label: "Tile Size (T×T)"
+})
+
+viewof cacheSize = Inputs.select([32, 64, 256, 512, 1024], {
+  value: 256,
+  label: "Cache Size (KB)"
+})
+```
+
+```{ojs}
+//| echo: false
+
+// Memory calculations
+elemSize = 4  // float32
+
+// Naive approach - no tiling
+naiveBytesPerOutput = 2 * matrixSize * elemSize  // Read full row of A and column of B
+naiveTotalReads = matrixSize * matrixSize * matrixSize * 2 * elemSize  // Each element read N times
+naiveReuse = 1
+
+// Tiled approach
+tileBytes = tileSizeMatmul * tileSizeMatmul * elemSize
+workingSet = 3 * tileBytes  // A tile + B tile + C tile
+workingSetKB = workingSet / 1024
+
+// How many times each element is reused
+tiledReuse = matrixSize / tileSizeMatmul
+numTiles = Math.pow(matrixSize / tileSizeMatmul, 3)
+
+// Effective data movement
+tiledTotalReads = 2 * matrixSize * matrixSize * (matrixSize / tileSizeMatmul) * elemSize
+reductionFactor = naiveTotalReads / tiledTotalReads
+
+// Does it fit in cache?
+fitsInCache = workingSetKB <= cacheSize
+
+// Arithmetic intensity
+flops = 2 * Math.pow(matrixSize, 3)
+naiveIntensity = flops / naiveTotalReads
+tiledIntensity = flops / tiledTotalReads
+```
+
+```{ojs}
+//| echo: false
+
+html`<div style="margin: 20px 0;">
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+
+    <div style="padding: 20px; background: linear-gradient(135deg, #fee2e2, #fecaca); border-radius: 12px; border-left: 4px solid #ef4444;">
+      <h4 style="margin: 0 0 15px 0; color: #b91c1c;">Naive (No Tiling)</h4>
+      <div style="font-size: 0.9em; color: #7f1d1d;">
+        <div style="margin-bottom: 8px;">
+          <strong>Working Set:</strong> Full matrix (~${(matrixSize * matrixSize * elemSize / 1e6).toFixed(0)} MB)
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong>Data Reuse:</strong> ${naiveReuse}× (none)
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong>Memory Reads:</strong> ${(naiveTotalReads / 1e9).toFixed(1)} GB
+        </div>
+        <div>
+          <strong>Arithmetic Intensity:</strong> ${naiveIntensity.toFixed(2)} FLOPs/byte
+        </div>
+      </div>
+      <div style="margin-top: 12px; padding: 8px; background: #fecaca; border-radius: 6px; font-size: 0.8em; color: #991b1b;">
+        Memory-bound: Each element re-read ${matrixSize}×
+      </div>
+    </div>
+
+    <div style="padding: 20px; background: linear-gradient(135deg, #dcfce7, #bbf7d0); border-radius: 12px; border-left: 4px solid #22c55e;">
+      <h4 style="margin: 0 0 15px 0; color: #15803d;">Tiled (T=${tileSizeMatmul})</h4>
+      <div style="font-size: 0.9em; color: #14532d;">
+        <div style="margin-bottom: 8px;">
+          <strong>Working Set:</strong> ${workingSetKB.toFixed(1)} KB
+          ${fitsInCache ?
+            html`<span style="color: #16a34a; font-weight: bold;"> ✓ Fits in ${cacheSize}KB cache!</span>` :
+            html`<span style="color: #dc2626; font-weight: bold;"> ✗ Exceeds ${cacheSize}KB cache</span>`}
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong>Data Reuse:</strong> ${tiledReuse.toFixed(0)}× per tile load
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong>Memory Reads:</strong> ${(tiledTotalReads / 1e9).toFixed(1)} GB
+        </div>
+        <div>
+          <strong>Arithmetic Intensity:</strong> ${tiledIntensity.toFixed(1)} FLOPs/byte
+        </div>
+      </div>
+      <div style="margin-top: 12px; padding: 8px; background: #bbf7d0; border-radius: 6px; font-size: 0.8em; color: #166534;">
+        ${reductionFactor.toFixed(0)}× less memory traffic
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border-radius: 12px;">
+    <h5 style="margin: 0 0 15px 0; color: #0369a1;">Tiling Visualization</h5>
+    <div style="display: flex; gap: 40px; align-items: flex-start;">
+
+      <div style="text-align: center;">
+        <div style="font-size: 0.8em; color: #666; margin-bottom: 8px;">Matrix A (${matrixSize}×${matrixSize})</div>
+        <div style="position: relative; width: 120px; height: 120px; background: #e0f2fe; border: 2px solid #0284c7; border-radius: 4px;">
+          <div style="position: absolute; top: 0; left: 0; width: ${120 * tileSizeMatmul / matrixSize}px; height: ${120 * tileSizeMatmul / matrixSize}px; background: #0284c7; opacity: 0.7; border-radius: 2px;"></div>
+          <div style="position: absolute; bottom: 5px; right: 5px; font-size: 0.7em; color: #0369a1;">A tile</div>
+        </div>
+      </div>
+
+      <div style="font-size: 2em; color: #666; margin-top: 50px;">×</div>
+
+      <div style="text-align: center;">
+        <div style="font-size: 0.8em; color: #666; margin-bottom: 8px;">Matrix B (${matrixSize}×${matrixSize})</div>
+        <div style="position: relative; width: 120px; height: 120px; background: #fef3c7; border: 2px solid #d97706; border-radius: 4px;">
+          <div style="position: absolute; top: 0; left: 0; width: ${120 * tileSizeMatmul / matrixSize}px; height: ${120 * tileSizeMatmul / matrixSize}px; background: #d97706; opacity: 0.7; border-radius: 2px;"></div>
+          <div style="position: absolute; bottom: 5px; right: 5px; font-size: 0.7em; color: #92400e;">B tile</div>
+        </div>
+      </div>
+
+      <div style="font-size: 2em; color: #666; margin-top: 50px;">=</div>
+
+      <div style="text-align: center;">
+        <div style="font-size: 0.8em; color: #666; margin-bottom: 8px;">Matrix C (${matrixSize}×${matrixSize})</div>
+        <div style="position: relative; width: 120px; height: 120px; background: #fce7f3; border: 2px solid #db2777; border-radius: 4px;">
+          <div style="position: absolute; top: 0; left: 0; width: ${120 * tileSizeMatmul / matrixSize}px; height: ${120 * tileSizeMatmul / matrixSize}px; background: #db2777; opacity: 0.7; border-radius: 2px;"></div>
+          <div style="position: absolute; bottom: 5px; right: 5px; font-size: 0.7em; color: #9d174d;">C tile</div>
+        </div>
+      </div>
+
+      <div style="margin-left: 20px; font-size: 0.85em; color: #374151; max-width: 200px;">
+        <div style="margin-bottom: 8px;"><strong>${numTiles.toFixed(0)} tile operations</strong></div>
+        <div style="margin-bottom: 4px;">Each A tile: ${(tileBytes / 1024).toFixed(1)} KB</div>
+        <div style="margin-bottom: 4px;">Each B tile: ${(tileBytes / 1024).toFixed(1)} KB</div>
+        <div>Each C tile: ${(tileBytes / 1024).toFixed(1)} KB</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 15px; padding: 15px; background: #f9fafb; border-radius: 8px; font-size: 0.85em; color: #4b5563;">
+    <strong>Key insight:</strong> Each tile of A and B is loaded once but used for T² multiply-adds (reuse = ${tileSizeMatmul}). Smaller tiles have less reuse but fit in faster cache levels. The optimal tile size balances these tradeoffs.
+  </div>
+</div>`
+```
+:::
+
 ### Benchmark
 
 ```
