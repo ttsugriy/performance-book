@@ -1,0 +1,371 @@
+---
+title: "Redundancy"
+subtitle: "When Less Information Means More Speed"
+---
+
+::: {.chapter-opener}
+A 70-billion-parameter model stores weights in 32-bit floats: 280 GB of data.
+
+Reduce to 4 bits: 35 GB. The model barely notices.
+
+We just threw away 87.5% of the bits. Why does it still work?
+:::
+
+::: {.callout-note}
+## Property Spotlight: Redundancy
+
+**Redundancy** exists when the information content of data is less than its representation size.
+
+$$H(X) < \text{bits}(X)$$
+
+When data is redundant, we can:
+- **Compress** without losing essential information
+- **Quantize** to lower precision
+- **Cache** computed results (computation is "redundant" if repeated)
+- **Approximate** with simpler representations
+
+This chapter explores how redundancy enables some of the most practical optimizations in ML systems.
+:::
+
+## The Information-Theoretic View
+
+Claude Shannon defined information as surprise. If you can predict something, it carries no information.
+
+Neural network weights are not random. They're structured:
+
+```
+Typical weight distribution:
+- Concentrated near zero
+- Roughly Gaussian
+- Correlated across layers
+- Low effective rank (as we saw with LoRA)
+```
+
+This structure means the weights contain **less information than their representation suggests**.
+
+### Measuring Redundancy
+
+For a weight tensor W stored in b bits per element:
+
+$$\text{Redundancy} = b - H(W)$$
+
+where H(W) is the entropy of the weight distribution.
+
+Empirically, for trained neural networks:
+- FP32 uses 32 bits per weight
+- Actual entropy: often 4-8 bits per weight
+- **Redundancy: 24-28 bits per weight**
+
+This is why quantization works.
+
+## Quantization: Exploiting Numeric Redundancy
+
+Quantization reduces the bits per value:
+
+```
+FP32 → FP16:  32 → 16 bits  (2× compression)
+FP16 → INT8:  16 → 8 bits   (2× compression)
+INT8 → INT4:   8 → 4 bits   (2× compression)
+FP32 → INT4:  32 → 4 bits   (8× compression)
+```
+
+### Why It Works
+
+Neural networks are trained with noise:
+- Stochastic gradient descent
+- Dropout
+- Data augmentation
+- Mini-batch variance
+
+The training process makes networks **robust to small perturbations**. Quantization error is just another small perturbation.
+
+```python
+import torch
+
+def quantization_error_analysis(weights, bits=8):
+    """Analyze quantization error relative to weight magnitude."""
+    # Quantize
+    scale = (weights.max() - weights.min()) / (2**bits - 1)
+    quantized = torch.round((weights - weights.min()) / scale)
+    dequantized = quantized * scale + weights.min()
+
+    # Error analysis
+    error = (weights - dequantized).abs()
+    relative_error = error / (weights.abs() + 1e-10)
+
+    print(f"Bits: {bits}")
+    print(f"Max absolute error: {error.max():.6f}")
+    print(f"Mean relative error: {relative_error.mean():.2%}")
+    print(f"Weights affected >1%: {(relative_error > 0.01).float().mean():.2%}")
+```
+
+### The Outlier Problem
+
+Not all weights are equal. Some have outsize impact:
+
+```
+Weight distribution in LLMs:
+    │
+    │   ████████████████
+    │  ██████████████████████
+    │ █████████████████████████
+    │██████████████████████████████
+────┼──────────────────────────────────•──────
+    │                                outliers
+    └─────────────────────────────────────────→
+```
+
+A few outlier weights carry critical information. Quantizing them aggressively destroys model quality.
+
+**Solutions:**
+- **Mixed precision**: Keep outliers in higher precision
+- **Per-channel scaling**: Different scale factors for different channels
+- **GPTQ/AWQ**: Optimize quantization to minimize output error
+
+```python
+def mixed_precision_quantize(weights, outlier_threshold=3.0):
+    """Keep outliers in FP16, quantize the rest to INT4."""
+    std = weights.std()
+    outlier_mask = weights.abs() > outlier_threshold * std
+
+    # Outliers stay FP16
+    outliers = weights[outlier_mask]
+
+    # Rest goes to INT4
+    normal = weights[~outlier_mask]
+    normal_quantized = quantize_to_int4(normal)
+
+    return outliers, outlier_mask, normal_quantized
+```
+
+## Caching: Exploiting Computational Redundancy
+
+If you compute the same thing twice, the second computation is redundant.
+
+### KV Cache in Autoregressive Generation
+
+During LLM generation:
+
+```
+Step 1: Compute K, V for token 1         → Store K₁, V₁
+Step 2: Compute K, V for token 2         → Store K₂, V₂
+        Attention needs K₁, V₁           → Retrieved from cache
+Step 3: Compute K, V for token 3         → Store K₃, V₃
+        Attention needs K₁, V₁, K₂, V₂   → Retrieved from cache
+...
+```
+
+Without cache: O(n²) key-value computations for n tokens.
+With cache: O(n) key-value computations.
+
+**The redundancy**: At step n, we'd recompute K₁...K_{n-1} and V₁...V_{n-1}. But they're identical to what we computed before.
+
+### Prefix Caching
+
+Many prompts share prefixes:
+
+```
+Request 1: "You are a helpful assistant. User: What is Python?"
+Request 2: "You are a helpful assistant. User: What is Java?"
+Request 3: "You are a helpful assistant. User: What is Rust?"
+```
+
+The system prompt is identical. Computing KV for it three times is redundant.
+
+**Prefix caching** stores KV for common prefixes:
+
+```python
+class PrefixCache:
+    def __init__(self, max_size_gb=10):
+        self.cache = {}  # hash(prefix) → KV tensors
+        self.max_size = max_size_gb * 1e9
+
+    def get_or_compute(self, prefix_tokens, model):
+        key = hash(tuple(prefix_tokens))
+
+        if key in self.cache:
+            return self.cache[key]  # Cache hit!
+
+        # Cache miss: compute and store
+        kv = model.compute_kv(prefix_tokens)
+        self.cache[key] = kv
+        self.maybe_evict()
+
+        return kv
+```
+
+### Semantic Caching
+
+Even more aggressive: cache based on **meaning**, not exact match.
+
+```
+Request 1: "What's the capital of France?"
+Request 2: "What is the capital city of France?"
+Request 3: "France's capital?"
+```
+
+These are semantically identical. If we've answered one, we can return the cached answer for the others.
+
+```python
+def semantic_cache_lookup(query, cache, threshold=0.95):
+    """Find semantically similar cached queries."""
+    query_embedding = embed(query)
+
+    for cached_query, cached_response in cache.items():
+        similarity = cosine_similarity(query_embedding, embed(cached_query))
+        if similarity > threshold:
+            return cached_response  # Semantic cache hit!
+
+    return None  # Cache miss
+```
+
+## Approximation: Trading Precision for Speed
+
+Sometimes exact computation is redundant for the use case.
+
+### Speculative Decoding
+
+Use a small "draft" model to generate candidates, verify with the large model:
+
+```
+Draft model (1B params):  Generates 5 tokens quickly
+Large model (70B params): Verifies/corrects in one forward pass
+
+If draft is 80% accurate:
+  - Expected accepted tokens per step: ~4
+  - Speedup: ~3-4×
+```
+
+The draft model's approximate answers are "good enough" most of the time. We're exploiting the redundancy between what the small and large models produce.
+
+### Approximate Attention
+
+Full attention: Every token attends to every other token.
+
+But most attention weights are near zero:
+
+```
+Typical attention pattern:
+
+  Q │ ██░░░░░░░░░░░░░░██
+  u │ ███░░░░░░░░░░░░███
+  e │ ░███░░░░░░░░░░███░
+  r │ ░░███░░░░░░░░███░░
+  y │ ░░░████░░░░████░░░
+    │ ░░░░░█████████░░░░
+    │ ░░░░░░░██████░░░░░
+    └─────────────────────
+              Key
+
+█ = High attention (matters)
+░ = Low attention (redundant)
+```
+
+Sparse attention exploits this: only compute the non-zero parts.
+
+## Redundancy in Model Architecture
+
+### Weight Sharing
+
+CNNs share weights across spatial positions:
+
+```
+Image convolution:
+Same 3×3 kernel applied everywhere
+  - Instead of: H×W×9 parameters per layer
+  - We have: 9 parameters per layer
+  - Compression: H×W × (often >1000×)
+```
+
+This works because images have **translation invariance**: the same features appear in different locations.
+
+### Knowledge Distillation
+
+A student network learns to mimic a teacher:
+
+```
+Teacher (100B params) → [Knowledge] → Student (1B params)
+```
+
+The student captures the "essence" of the teacher's knowledge. The redundancy is in the teacher—it uses far more parameters than necessary to represent what it knows.
+
+### Mixture of Experts Routing
+
+MoE activates only k of N experts per token:
+
+```
+N = 64 experts, k = 2 activated
+
+The 62 non-activated experts are "redundant" for this token.
+Total capacity: 64× a dense model
+Compute cost: 2× a single expert ≈ dense model
+```
+
+Different tokens need different experts. The redundancy is conditional—what's redundant depends on the input.
+
+## The Redundancy-Quality Tradeoff
+
+All redundancy exploitation involves a tradeoff:
+
+```
+More Compression ←────────────────────→ Higher Quality
+     │                                        │
+     │    • 2-bit quantization               │
+     │    • Aggressive pruning               │
+     │    • Small draft models               │
+     │                                        │
+     │              Sweet spot               │
+     │                 ↓                      │
+     │            • 4-bit quant              │
+     │            • Moderate pruning         │
+     │            • Good draft models        │
+     │                                        │
+     │                                        │    • 16-bit
+     │                                        │    • No pruning
+     └────────────────────────────────────────┘
+```
+
+**Finding the sweet spot:**
+
+1. **Measure baseline quality** (perplexity, accuracy, human eval)
+2. **Apply compression incrementally**
+3. **Track quality degradation**
+4. **Stop when quality/size ratio is optimal**
+
+```python
+def find_optimal_quantization(model, eval_dataset, quality_threshold=0.95):
+    """Find the most aggressive quantization that maintains quality."""
+    baseline = evaluate(model, eval_dataset)
+
+    for bits in [8, 6, 4, 3, 2]:
+        quantized = quantize(model, bits=bits)
+        quality = evaluate(quantized, eval_dataset)
+
+        if quality / baseline >= quality_threshold:
+            print(f"{bits}-bit maintains {quality/baseline:.1%} of quality")
+            return bits, quantized
+        else:
+            print(f"{bits}-bit degrades to {quality/baseline:.1%} - too aggressive")
+
+    return 8, quantize(model, bits=8)  # Fall back to INT8
+```
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Redundancy Enables Compression
+
+1. **Information < Representation**: Neural network weights contain far less information than their bit-width suggests.
+
+2. **Quantization exploits numeric redundancy**: 4-bit weights often match 32-bit quality because the extra precision is noise.
+
+3. **Caching exploits computational redundancy**: Don't recompute what you've already computed.
+
+4. **Approximation exploits accuracy redundancy**: "Good enough" is often good enough.
+
+5. **The tradeoff is measurable**: Quantify quality vs. compression and find the sweet spot.
+:::
+
+---
+
+[**Next: Symmetry →**](p2-symmetry.qmd)

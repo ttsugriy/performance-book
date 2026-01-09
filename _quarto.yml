@@ -13,8 +13,10 @@ book:
 
   chapters:
     - index.qmd
-    - chapters/00a-thinking-in-arrays.qmd
-    - chapters/00-algebraic-framework.qmd
+    - part: "Foundation"
+      chapters:
+        - chapters/00a-thinking-in-arrays.qmd
+        - chapters/00-algebraic-framework.qmd
     - part: "Part I: The Hardware Reality"
       chapters:
         - chapters/01-memory-hierarchy.qmd
@@ -22,13 +24,14 @@ book:
         - chapters/03-parallelism.qmd
         - chapters/04-gpu-architecture.qmd
         - chapters/interlude-measurement.qmd
-    - part: "Part II: The Algebra of Efficiency"
+    - part: "Part II: The Six Properties"
       chapters:
         - chapters/04-chunking.qmd
         - chapters/05-factoring.qmd
-        - chapters/06-skipping.qmd
         - chapters/07-locality.qmd
-        - chapters/08-fusion.qmd
+        - chapters/06-skipping.qmd
+        - chapters/p2-redundancy.qmd
+        - chapters/p2-symmetry.qmd
     - part: "Part III: Algorithm Investigations"
       chapters:
         - chapters/09-matrix-multiply.qmd
@@ -44,16 +47,22 @@ book:
         - chapters/25-long-context.qmd
         - chapters/26-gpu-memory.qmd
         - chapters/27-advanced-serving.qmd
-    - part: "Part V: The Practitioner's Toolkit"
+    - part: "Part V: Methodology"
       chapters:
         - chapters/15-measurement.qmd
         - chapters/16-hypothesis.qmd
         - chapters/17-analogy.qmd
         - chapters/18-when-not-to.qmd
+    - part: "Part VI: Tools"
+      chapters:
         - chapters/19-profiling-tools.qmd
-        - chapters/21-triton.qmd
+        - chapters/08-fusion.qmd
         - chapters/29-torch-compile.qmd
+        - chapters/21-triton.qmd
         - chapters/31-gpu-kernel-frameworks.qmd
+    - part: "Part VII: Synthesis"
+      chapters:
+        - chapters/capstone.qmd
     - part: "Appendices"
       chapters:
         - chapters/30-hardware-specific.qmd

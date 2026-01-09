@@ -1,6 +1,6 @@
 ---
-title: "Chunking"
-subtitle: "How Associativity Enables Parallelism and Streaming"
+title: "Associativity"
+subtitle: "How Regrouping Enables Parallelism and Streaming"
 ---
 
 ::: {.chapter-opener}

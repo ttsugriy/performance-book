@@ -1,0 +1,339 @@
+---
+title: "Symmetry"
+subtitle: "When Structure Enables Sharing"
+---
+
+::: {.chapter-opener}
+A convolutional neural network has millions of parameters.
+
+But each filter is only 3×3×C weights. The same weights are applied at every spatial location.
+
+This isn't just compression. It's exploiting a fundamental symmetry of the problem.
+:::
+
+::: {.callout-note}
+## Property Spotlight: Symmetry
+
+**Symmetry** exists when a computation is invariant (or equivariant) under some transformation:
+
+$$f(g(x)) = f(x) \quad \text{or} \quad f(g(x)) = g(f(x))$$
+
+When symmetry exists, we can:
+- **Share weights** across symmetric positions
+- **Reduce computation** by computing once and transforming
+- **Build invariant features** that ignore irrelevant variation
+- **Apply Fourier methods** for translation-symmetric operations
+
+Symmetry is why CNNs work for images, why Transformers work for sequences, and why certain algorithms are vastly more efficient than brute force.
+:::
+
+## The Power of Invariance
+
+Consider image classification:
+
+```
+Question: "Is there a cat in this image?"
+
+The answer shouldn't change if we:
+- Shift the cat 10 pixels left
+- Slightly rotate the image
+- Change the lighting
+```
+
+These are **symmetries of the problem**: transformations that don't change the answer.
+
+A good classifier should be **invariant** to these transformations. But a naive fully-connected network treats each pixel independently—it has to *learn* that position doesn't matter.
+
+CNNs build in translation invariance:
+
+```
+Fully-connected:
+  - Each output depends on all inputs
+  - Parameters: H×W×C × num_outputs
+  - Must learn translation invariance from data
+
+Convolutional:
+  - Same filter applied everywhere
+  - Parameters: k×k×C × num_filters
+  - Translation invariance built in
+```
+
+## Weight Sharing: The Convolution Story
+
+### How Convolution Exploits Symmetry
+
+A 2D convolution applies the same kernel everywhere:
+
+```python
+def conv2d_explicit(image, kernel):
+    """Convolution as weight sharing across positions."""
+    H, W = image.shape
+    kH, kW = kernel.shape
+    output = np.zeros((H - kH + 1, W - kW + 1))
+
+    for i in range(output.shape[0]):
+        for j in range(output.shape[1]):
+            # Same kernel weights at every position
+            patch = image[i:i+kH, j:j+kW]
+            output[i, j] = np.sum(patch * kernel)
+
+    return output
+```
+
+The kernel weights are **shared** across all spatial positions. This sharing is valid because we assume translation symmetry: features can appear anywhere in the image.
+
+### Parameter Reduction
+
+For an image layer mapping 256 channels to 256 channels:
+
+```
+Fully connected: 256 × 256 × H × W parameters
+                 (For 224×224: ~3.3 billion parameters)
+
+Convolution (3×3): 256 × 256 × 3 × 3 = 590K parameters
+                   (5600× fewer parameters)
+```
+
+This isn't a trick—it's recognizing that the problem has symmetry.
+
+### Translation Equivariance
+
+CNNs are not just *invariant* to translation at the output. They're **equivariant** in the intermediate layers:
+
+```
+Equivariant: Shifting the input shifts the feature maps by the same amount.
+
+Input:    [🐱    ]     Shift→    [    🐱]
+Features: [✨    ]     Shift→    [    ✨]
+```
+
+This equivariance propagates through the network until pooling or fully-connected layers create invariance.
+
+## Fourier Methods: Convolution as Multiplication
+
+The convolution theorem provides a remarkable efficiency gain:
+
+$$\mathcal{F}(f * g) = \mathcal{F}(f) \cdot \mathcal{F}(g)$$
+
+Convolution in the spatial domain equals element-wise multiplication in the Fourier domain.
+
+```python
+import numpy as np
+from numpy.fft import fft2, ifft2
+
+def conv2d_fourier(image, kernel, shape):
+    """Convolution via FFT - exploits circulant structure."""
+    # Pad kernel to image size
+    kernel_padded = np.zeros(shape)
+    kernel_padded[:kernel.shape[0], :kernel.shape[1]] = kernel
+
+    # Convolve via FFT
+    F_image = fft2(image, s=shape)
+    F_kernel = fft2(kernel_padded, s=shape)
+    F_result = F_image * F_kernel
+
+    return np.real(ifft2(F_result))
+```
+
+### Complexity Comparison
+
+```
+Direct convolution: O(N² × K²)  for N×N image, K×K kernel
+FFT convolution:    O(N² log N)  for any kernel size
+```
+
+For large kernels (K > ~15), FFT wins. This is exploiting the **translation symmetry** of convolution—the operation's structure enables the Fourier shortcut.
+
+## Group Equivariance: Beyond Translation
+
+Translation is just one symmetry. What about rotation, scaling, or reflection?
+
+### The Limitation of Standard CNNs
+
+A standard CNN learns rotation invariance from data:
+
+```
+Training data: Cats at all orientations
+Network: Learns separate "cat at 0°", "cat at 45°", "cat at 90°" detectors
+Problem: Wasteful—these are the same feature rotated
+```
+
+### Group Equivariant Networks
+
+**Group equivariant CNNs** (G-CNNs) build rotation equivariance into the architecture:
+
+```python
+# Conceptually: a G-CNN layer
+def g_conv2d(input, kernel, group):
+    """Convolution equivariant to a symmetry group."""
+    outputs = []
+    for g in group.elements():  # e.g., 0°, 90°, 180°, 270° rotations
+        rotated_kernel = group.transform(kernel, g)
+        output = conv2d(input, rotated_kernel)
+        outputs.append(output)
+    return stack(outputs)
+```
+
+The output has an extra dimension: orientation. The same kernel detects the same feature at all orientations, with orientation explicitly tracked.
+
+### Benefits of Group Equivariance
+
+```
+Standard CNN:  Learns 4 copies of "vertical edge" (0°, 90°, 180°, 270°)
+G-CNN:         Learns 1 "edge" kernel, applied at 4 orientations
+
+Parameter reduction: 4×
+Sample efficiency:   Better generalization
+```
+
+Applications:
+- **Medical imaging**: Tumors can appear at any orientation
+- **Satellite imagery**: No "up" direction
+- **Molecular modeling**: Molecules rotate freely
+
+## Symmetry in Attention
+
+The Transformer architecture has its own symmetry properties.
+
+### Permutation Equivariance
+
+Self-attention is **permutation equivariant** for the input set:
+
+```python
+def self_attention(X):
+    """Self-attention is equivariant to input permutation."""
+    Q = X @ W_Q
+    K = X @ W_K
+    V = X @ W_V
+    return softmax(Q @ K.T / sqrt(d)) @ V
+```
+
+If you permute the rows of X, the output is permuted the same way. This makes attention suitable for sets (like point clouds) where there's no inherent ordering.
+
+### Breaking Symmetry with Position
+
+For sequences, we *want* position to matter. Position embeddings break the permutation symmetry:
+
+```python
+def transformer_with_position(X, positions):
+    """Position embeddings break permutation symmetry."""
+    X = X + position_embedding(positions)  # Break symmetry
+    return self_attention(X)
+```
+
+This is a design choice: Transformers start permutation-equivariant and add position information.
+
+## Symmetry in Optimization
+
+Some optimizations exploit symmetry of the parameter space.
+
+### Weight Initialization
+
+Neural network loss surfaces have symmetries:
+- Permuting neurons in a layer doesn't change the function
+- Scaling one layer and inversely scaling the next is equivalent
+
+Good initialization respects these symmetries:
+
+```python
+def he_initialization(fan_in, fan_out):
+    """He initialization: symmetric about zero, scaled to preserve variance."""
+    std = np.sqrt(2.0 / fan_in)
+    return np.random.randn(fan_in, fan_out) * std
+```
+
+### Batch Normalization
+
+BatchNorm exploits a symmetry: scaling and shifting activations doesn't fundamentally change what the layer can compute.
+
+```
+Before BN: Layer must learn scale and shift from data
+With BN:   Scale/shift factored out, then re-added as learnable
+
+The symmetric "scale-shift" is handled separately from the "what to compute"
+```
+
+## Exploiting Symmetry in Practice
+
+### Pattern: Identify the Symmetry Group
+
+For any problem, ask: "What transformations leave the answer unchanged?"
+
+| Problem | Symmetry | How to Exploit |
+|---------|----------|----------------|
+| Image classification | Translation | Convolution |
+| Image (any orientation) | Translation + rotation | G-CNNs |
+| Point clouds | Permutation | PointNet, attention |
+| Molecules | SE(3) (rotation + translation) | Equivariant GNNs |
+| Time series | Translation | 1D convolution |
+
+### Pattern: Build Equivariance, Then Invariance
+
+```
+Input → [Equivariant layers] → [Pooling] → [Invariant output]
+
+Equivariant: Preserve information about transformation
+Invariant:   Discard transformation, keep content
+```
+
+Example in CNN:
+```
+Image → [Conv, Conv, Conv] → [Global Average Pool] → Class prediction
+         Equivariant            Creates invariance
+```
+
+### Pattern: Fourier for Translation-Symmetric Operations
+
+When computation has translation structure:
+- Convolution → FFT
+- Circular correlation → FFT
+- Filtering → FFT
+
+The FFT exploits the circulant symmetry of these operations.
+
+## The Symmetry Design Space
+
+When designing architectures, symmetry is a key choice:
+
+```
+More Symmetry ←─────────────────→ Less Symmetry
+     │                                   │
+     │  • G-CNNs                         │
+     │  • Full rotation invariance       │
+     │  • Less expressive                │
+     │                                   │
+     │          CNN                      │
+     │          Translation only         │
+     │                                   │
+     │                                   │  • MLP
+     │                                   │  • No built-in symmetry
+     │                                   │  • Most expressive
+     └───────────────────────────────────┘
+```
+
+More symmetry means:
+- **Fewer parameters** (sharing)
+- **Better sample efficiency** (built-in inductive bias)
+- **Less expressiveness** (can't break the symmetry)
+
+The right choice depends on whether the symmetry actually holds for your problem.
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Symmetry Enables Structure
+
+1. **Symmetry = transformation invariance**: When the answer doesn't change under transformation, build that into the architecture.
+
+2. **Weight sharing exploits symmetry**: Convolution shares weights because images have translation symmetry.
+
+3. **Equivariance preserves information**: Features should transform with the input, creating invariance only at the output.
+
+4. **Fourier methods exploit circulant structure**: Convolution is multiplication in Fourier space—a massive efficiency gain.
+
+5. **Design choice**: Match the symmetry group of your problem. Too much symmetry loses expressiveness; too little wastes parameters.
+:::
+
+---
+
+[**Part III: Algorithm Investigations →**](09-matrix-multiply.qmd)
