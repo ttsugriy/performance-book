@@ -497,6 +497,58 @@ ncu --set full -o profile python script.py
 # - Warp execution efficiency (target: >90%)
 ```
 
+### 6. Benchmark with `triton.testing`
+
+Triton includes a robust benchmarking module that follows GPU benchmarking best practices:
+
+```python
+import triton
+
+# Simple timing (returns min time in ms by default)
+ms = triton.testing.do_bench(lambda: kernel[grid](a, b, c))
+
+# With all statistics
+ms = triton.testing.do_bench(
+    lambda: kernel[grid](a, b, c),
+    warmup=25,       # Warmup iterations
+    rep=100,         # Timed repetitions
+    return_mode='median',  # 'min', 'max', 'mean', 'median', 'all'
+)
+```
+
+For systematic benchmarking across problem sizes:
+
+```python
+@triton.testing.perf_report(
+    triton.testing.Benchmark(
+        x_names=['M', 'N'],
+        x_vals=[(512, 512), (1024, 1024), (2048, 2048)],
+        line_arg='provider',
+        line_vals=['triton', 'torch'],
+        line_names=['Triton', 'PyTorch'],
+        xlabel='Matrix Size',
+        ylabel='TFLOPS',
+    )
+)
+def benchmark_matmul(M, N, provider):
+    K = 512
+    a = torch.randn(M, K, device='cuda')
+    b = torch.randn(K, N, device='cuda')
+
+    if provider == 'triton':
+        fn = lambda: triton_matmul(a, b)
+    else:
+        fn = lambda: torch.mm(a, b)
+
+    ms = triton.testing.do_bench(fn)
+    flops = 2 * M * N * K
+    return flops / ms / 1e9  # TFLOPS
+
+benchmark_matmul.run(print_data=True, save_path='benchmark.png')
+```
+
+This automatically generates comparison plots. See [Chapter 15: The Art of Measurement](15-measurement.qmd#gpu-benchmarking-the-do_bench-pattern) for a deeper discussion of GPU benchmarking methodology.
+
 ## Debugging Triton Kernels
 
 ### Print Debugging

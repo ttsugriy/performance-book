@@ -531,6 +531,271 @@ for i in range(100):
     times.append(time.time() - start)
 ```
 
+## GPU Benchmarking: The `do_bench` Pattern
+
+GPU benchmarking has unique challenges that require specialized methodology. The approach used by [Triton's testing module](https://github.com/triton-lang/triton/blob/main/python/triton/testing.py) represents current best practices.
+
+### Why GPU Benchmarking Is Different
+
+```
+CPU benchmarking:
+  - Measure wall time
+  - Variance from OS scheduling, caches
+  - Min/mean/median all useful
+
+GPU benchmarking:
+  - Kernel launch is async (must synchronize!)
+  - Variance from thermal throttling, memory contention, PCIe
+  - Minimum is often most informative
+  - Cache state between runs matters significantly
+```
+
+### The Case for Minimum
+
+For GPU benchmarks, the **minimum** time is often the most reproducible and meaningful:
+
+```
+Sources of noise in GPU timing:
+  ✗ Thermal throttling (adds time)
+  ✗ Memory bus contention (adds time)
+  ✗ Other processes (adds time)
+  ✗ Power state transitions (adds time)
+
+Notice: noise almost always ADDS time, never removes it.
+
+The minimum represents:
+  ✓ "Performance without interference"
+  ✓ Most reproducible across runs
+  ✓ What the hardware can actually achieve
+```
+
+**Caveat**: For latency-sensitive applications (user-facing inference), you care about tail latency (p99). Use minimum for optimization comparisons; use percentiles for SLA compliance.
+
+### A Production-Ready Benchmark Utility
+
+Here's a utility incorporating all best practices, inspired by Triton's `do_bench`:
+
+```python
+import torch
+import time
+from dataclasses import dataclass
+from typing import Callable, Optional, List
+
+@dataclass
+class BenchmarkResult:
+    """Results from GPU benchmarking."""
+    min_ms: float
+    max_ms: float
+    mean_ms: float
+    median_ms: float
+    std_ms: float
+    n_runs: int
+    warmup_runs: int
+
+    def __repr__(self):
+        return (f"BenchmarkResult(min={self.min_ms:.3f}ms, "
+                f"mean={self.mean_ms:.3f}ms, "
+                f"median={self.median_ms:.3f}ms, "
+                f"n={self.n_runs})")
+
+    @property
+    def throughput(self) -> float:
+        """Operations per second based on min time."""
+        return 1000.0 / self.min_ms
+
+
+def do_bench(
+    fn: Callable,
+    warmup_ms: float = 25.0,
+    target_time_ms: float = 100.0,
+    min_runs: int = 10,
+    max_runs: int = 1000,
+    quantiles: Optional[List[float]] = None,
+    clear_cache: bool = False,
+    cache_size_mb: int = 40,
+) -> BenchmarkResult:
+    """
+    Benchmark a GPU function with proper methodology.
+
+    Key features:
+    - Warmup until stable (time-based, not count-based)
+    - Proper CUDA synchronization
+    - Time-based repetitions for consistent results
+    - Optional cache clearing between runs
+    - Returns comprehensive statistics
+
+    Args:
+        fn: Function to benchmark (should include all GPU ops)
+        warmup_ms: Time to spend on warmup (default 25ms)
+        target_time_ms: Target total benchmarking time (default 100ms)
+        min_runs: Minimum number of timed runs
+        max_runs: Maximum number of timed runs
+        quantiles: If provided, return these percentiles
+        clear_cache: If True, flush GPU cache between runs
+        cache_size_mb: Size of cache-clearing buffer
+
+    Returns:
+        BenchmarkResult with timing statistics
+    """
+    import numpy as np
+
+    # Cache-clearing buffer (if needed)
+    if clear_cache:
+        cache_buffer = torch.empty(
+            cache_size_mb * 1024 * 1024 // 4,
+            dtype=torch.float32,
+            device='cuda'
+        )
+
+    def run_once():
+        if clear_cache:
+            cache_buffer.zero_()  # Flush L2 cache
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        fn()
+        torch.cuda.synchronize()
+        return (time.perf_counter() - start) * 1000  # ms
+
+    # Phase 1: Warmup (time-based)
+    warmup_runs = 0
+    warmup_start = time.perf_counter()
+    while (time.perf_counter() - warmup_start) * 1000 < warmup_ms:
+        fn()
+        warmup_runs += 1
+    torch.cuda.synchronize()
+
+    # Phase 2: Estimate single-run time
+    estimates = [run_once() for _ in range(3)]
+    estimate_ms = np.median(estimates)
+
+    # Phase 3: Calculate number of runs needed
+    if estimate_ms > 0:
+        n_runs = max(min_runs, int(target_time_ms / estimate_ms))
+        n_runs = min(n_runs, max_runs)
+    else:
+        n_runs = min_runs
+
+    # Phase 4: Timed runs
+    times = [run_once() for _ in range(n_runs)]
+    times = np.array(times)
+
+    result = BenchmarkResult(
+        min_ms=float(np.min(times)),
+        max_ms=float(np.max(times)),
+        mean_ms=float(np.mean(times)),
+        median_ms=float(np.median(times)),
+        std_ms=float(np.std(times)),
+        n_runs=n_runs,
+        warmup_runs=warmup_runs,
+    )
+
+    # Optional: return quantiles
+    if quantiles is not None:
+        result.quantiles = {
+            q: float(np.percentile(times, q * 100))
+            for q in quantiles
+        }
+
+    return result
+```
+
+### Usage Examples
+
+```python
+# Basic usage
+result = do_bench(lambda: model(input))
+print(f"Forward pass: {result.min_ms:.2f}ms")
+
+# With cache clearing (for memory-bound kernels)
+result = do_bench(
+    lambda: torch.mm(A, B),
+    clear_cache=True,
+    target_time_ms=200,
+)
+
+# Get specific quantiles
+result = do_bench(
+    lambda: attention(q, k, v),
+    quantiles=[0.5, 0.9, 0.99],
+)
+print(f"p50: {result.quantiles[0.5]:.2f}ms")
+print(f"p99: {result.quantiles[0.99]:.2f}ms")
+
+# Compare two implementations
+result_a = do_bench(lambda: impl_a(x))
+result_b = do_bench(lambda: impl_b(x))
+speedup = result_b.min_ms / result_a.min_ms
+print(f"A is {speedup:.2f}x faster than B")
+```
+
+### When to Clear Cache
+
+```
+Clear cache between runs when:
+  ✓ Testing memory-bound kernels
+  ✓ Measuring cold-start behavior
+  ✓ Comparing algorithms with different memory patterns
+
+Don't clear cache when:
+  ✗ Measuring steady-state throughput
+  ✗ Simulating real workloads (cache is usually warm)
+  ✗ Speed is critical (cache clearing adds overhead)
+```
+
+### Time-Based vs. Count-Based Repetitions
+
+Why target a *time budget* instead of a fixed iteration count?
+
+```
+Problem with fixed counts:
+  - Fast kernel (1μs): 100 runs = 0.1ms total → noisy
+  - Slow kernel (100ms): 100 runs = 10s total → wasteful
+
+Time-based approach:
+  - Target 100ms total benchmarking time
+  - Fast kernel: ~100,000 runs → stable statistics
+  - Slow kernel: ~1 run → respects your time
+
+The do_bench utility handles this automatically.
+```
+
+### Integration with Triton
+
+When using Triton, you can use its built-in benchmarking:
+
+```python
+import triton
+
+# Triton's built-in benchmark
+ms = triton.testing.do_bench(lambda: kernel[grid](a, b, c))
+
+# With custom settings
+ms, min_ms, max_ms = triton.testing.do_bench(
+    lambda: kernel[grid](a, b, c),
+    warmup=25,
+    rep=100,
+    return_mode='all',
+)
+
+# For comparing multiple implementations
+@triton.testing.perf_report(
+    triton.testing.Benchmark(
+        x_names=['M'],
+        x_vals=[128, 256, 512, 1024],
+        line_arg='provider',
+        line_vals=['triton', 'torch'],
+        line_names=['Triton', 'PyTorch'],
+        xlabel='Matrix Size',
+        ylabel='Time (ms)',
+    )
+)
+def benchmark(M, provider):
+    if provider == 'triton':
+        return lambda: triton_matmul(a, b)
+    else:
+        return lambda: torch.mm(a, b)
+```
+
 ## Building a Measurement Discipline
 
 ### 1. Define What You're Measuring
