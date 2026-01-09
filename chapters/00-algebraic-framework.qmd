@@ -12,6 +12,14 @@ Every performance optimization exploits a mathematical property. Understanding t
 This chapter establishes the framework that unifies the entire book.
 :::
 
+::: {.callout-note}
+## Building on Array-Oriented Thinking
+
+This chapter provides the **vocabulary** for optimization: the six properties that enable performance transformations.
+
+The [previous chapter](00a-thinking-in-arrays.qmd) provided the **mental model**: thinking in arrays exposes structure that loops hide. Together, they form a complete foundation—you need the mental model to *see* structure, and the vocabulary to *name* and exploit it.
+:::
+
 ## The Central Claim
 
 This book makes a bold claim:

@@ -219,12 +219,12 @@ This book stands on the shoulders of giants:
 
 ## Let's Begin
 
-Before diving into hardware specifics or optimization techniques, we need to establish the conceptual framework that ties everything together.
+Before diving into hardware specifics or optimization techniques, we need to establish the right mental model.
 
-The next chapter introduces **The Algebraic Framework**—the six fundamental properties that make computational optimization possible. Think of it as a periodic table for performance: once you understand these elements, you can predict which optimizations apply to which problems.
+The next chapter introduces **Thinking in Arrays**—the cognitive shift from loop-based programming to array-oriented computation. This isn't just syntax; it's a fundamentally different way of seeing programs that makes mathematical structure visible.
 
-This framework is what separates "I memorized a trick" from "I understand why the trick works."
+Following that, **The Algebraic Framework** provides the vocabulary—the six fundamental properties that enable all significant optimizations. Together, these two chapters form the conceptual foundation for everything that follows.
 
 Let's begin.
 
-[**The Algebraic Framework →**](chapters/00-algebraic-framework.qmd)
+[**Thinking in Arrays →**](chapters/00a-thinking-in-arrays.qmd)

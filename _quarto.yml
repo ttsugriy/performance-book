@@ -13,6 +13,7 @@ book:
 
   chapters:
     - index.qmd
+    - chapters/00a-thinking-in-arrays.qmd
     - chapters/00-algebraic-framework.qmd
     - part: "Part I: The Hardware Reality"
       chapters:
