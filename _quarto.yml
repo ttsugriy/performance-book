@@ -23,13 +23,13 @@ book:
         - chapters/02-bandwidth.qmd
         - chapters/03-parallelism.qmd
         - chapters/04-gpu-architecture.qmd
-        - chapters/interlude-measurement.qmd
     - part: "Part II: The Six Properties"
       chapters:
         - chapters/04-chunking.qmd
         - chapters/05-factoring.qmd
         - chapters/07-locality.qmd
         - chapters/06-skipping.qmd
+        - chapters/06-reversibility.qmd
         - chapters/p2-redundancy.qmd
         - chapters/p2-symmetry.qmd
     - part: "Part III: Algorithm Investigations"
