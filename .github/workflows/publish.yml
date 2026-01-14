@@ -37,8 +37,42 @@ jobs:
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: Render Quarto Book
-        run: quarto render
+      - name: Cache TinyTeX
+        uses: actions/cache@v4
+        with:
+          path: ~/bin/tinytex
+          key: tinytex-${{ runner.os }}-${{ hashFiles('.github/workflows/publish.yml') }}
+          restore-keys: |
+            tinytex-${{ runner.os }}-
+
+      - name: Install TinyTeX
+        run: |
+          if [ ! -d ~/bin/tinytex ]; then
+            quarto install tinytex --update-path
+          else
+            export PATH="$HOME/bin:$PATH"
+          fi
+
+      - name: Install additional LaTeX packages
+        run: |
+          export PATH="$HOME/bin:$PATH"
+          tlmgr install fvextra framed upquote lineno || true
+
+      - name: Render HTML
+        run: quarto render --to html
+
+      - name: Render PDF
+        run: |
+          export PATH="$HOME/bin:$PATH"
+          quarto render --to pdf || echo "PDF generation encountered issues, continuing with HTML only"
+
+      - name: Copy PDF to site
+        run: |
+          if [ -f "_book/The-Algebra-of-Speed.pdf" ]; then
+            cp "_book/The-Algebra-of-Speed.pdf" "_site/The-Algebra-of-Speed.pdf"
+          elif [ -f "The-Algebra-of-Speed.pdf" ]; then
+            cp "The-Algebra-of-Speed.pdf" "_site/The-Algebra-of-Speed.pdf"
+          fi
 
       - name: Setup Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
