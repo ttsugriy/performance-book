@@ -80,6 +80,7 @@ The RAM model says these are all "O(1)." The machine disagrees.
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+::: {.content-visible when-format="html"}
 ::: {.callout-note}
 ## Interactive: Memory Hierarchy Explorer
 
@@ -183,6 +184,7 @@ html`
 </div>
 `
 ```
+:::
 :::
 
 ## Why the Hierarchy Exists

@@ -3,6 +3,22 @@ title: "The Algebra of Speed"
 subtitle: "Mathematical Foundations of Computational Performance"
 ---
 
+::: {.content-visible when-format="pdf"}
+::: {.callout-note}
+## Note for PDF Readers
+
+This PDF is optimized for offline reading. The web version at [ttsugriy.github.io/performance-book](https://ttsugriy.github.io/performance-book/) includes interactive visualizations and executable notebooks that cannot be reproduced in print. For the full experience, visit the web version.
+:::
+:::
+
+::: {.content-visible when-format="html"}
+::: {.callout-tip}
+## PDF Available
+
+Prefer offline reading? [Download the PDF version](The-Algebra-of-Speed.pdf) of this book.
+:::
+:::
+
 # Preface {.unnumbered}
 
 FlashAttention delivers 2-4× speedups. LoRA fine-tunes 65-billion-parameter models on a single GPU. Mixtral matches models 5× its compute budget.
