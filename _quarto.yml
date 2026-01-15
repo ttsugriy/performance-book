@@ -84,28 +84,17 @@ format:
     number-sections: true
     highlight-style: github
     fig-responsive: true
-  pdf:
-    output-file: "The-Algebra-of-Speed.pdf"
-    documentclass: scrbook
-    papersize: letter
-    toc: true
-    toc-depth: 2
-    number-sections: true
-    colorlinks: true
-    link-citations: true
-    highlight-style: github
-    code-block-bg: "#f8f8f8"
-    code-block-border-left: "#e1e1e1"
-    keep-tex: false
-    include-in-header:
-      text: |
-        \usepackage{fvextra}
-        \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
-    geometry:
-      - top=1in
-      - bottom=1in
-      - left=1.25in
-      - right=1.25in
+
+# PDF format temporarily disabled - OJS blocks cause rendering to hang
+# See: https://github.com/quarto-dev/quarto-cli/issues/5994
+# To re-enable: wrap OJS blocks in ::: {.content-visible when-format="html"}
+#  pdf:
+#    output-file: "The-Algebra-of-Speed.pdf"
+#    documentclass: scrbook
+#    papersize: letter
+#    toc: true
+#    number-sections: true
+#    colorlinks: true
 
 execute:
   freeze: auto
