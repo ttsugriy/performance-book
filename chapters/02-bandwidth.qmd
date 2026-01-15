@@ -278,7 +278,6 @@ Many performance improvements fail because they optimize the wrong thing. Making
 
 Know your bottleneck. Then attack it.
 
-::: {.content-visible when-format="html"}
 ::: {.callout-note}
 ## Interactive: The Roofline Explorer
 
@@ -319,7 +318,6 @@ html`
 </div>
 `
 ```
-:::
 :::
 
 ## Key Takeaways

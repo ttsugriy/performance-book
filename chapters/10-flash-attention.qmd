@@ -16,7 +16,7 @@ This chapter is a case study in **associativity**—the first property from our 
 
 Softmax-weighted sums can be computed incrementally: $(a ⊕ b) ⊕ c = a ⊕ (b ⊕ c)$. This associative structure is what makes chunking possible. Without it, we'd be forced to materialize the full n×n attention matrix.
 
-The derivation that follows shows how recognizing associativity leads directly to the FlashAttention algorithm—first introduced by @dao2022flashattention and refined in subsequent versions [@dao2023flashattention2; @shah2024flashattention3].
+The derivation that follows shows how recognizing associativity leads directly to the FlashAttention algorithm.
 :::
 
 ## The Problem
@@ -43,7 +43,6 @@ Per layer. Per head. Per batch element.
 
 An 80GB A100 runs out of memory quickly.
 
-::: {.content-visible when-format="html"}
 ::: {.callout-tip collapse="true"}
 ## Interactive: FlashAttention Memory Explorer
 
@@ -175,7 +174,6 @@ html`<div style="margin-top: 20px;">
 ```
 
 **Key insight:** FlashAttention processes small tiles that fit in SRAM (shared memory), avoiding the O(n²) HBM memory footprint. The total memory is dominated by the O(n·d) output and statistics, not the attention matrix.
-:::
 :::
 
 ## The Question

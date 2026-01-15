@@ -303,7 +303,6 @@ Step 3: Continue pattern...
 
 This is the basis of GPU parallel scan, enabling O(log n) depth with O(n) work.
 
-::: {.content-visible when-format="html"}
 ::: {.callout-tip collapse="true"}
 ## Interactive: Parallel Scan Visualization
 
@@ -497,7 +496,6 @@ html`<div style="margin: 20px 0;">
 
 **Key insight:** Because addition is associative, we can reorder the computation. Instead of n-1 sequential adds, we use O(log n) parallel rounds. The up-sweep computes partial sums; the down-sweep distributes them—all enabled by the freedom to regroup.
 :::
-:::
 
 ## When Associativity Breaks
 
@@ -560,40 +558,6 @@ Associativity        →    Limited SRAM         →  Tiled/blocked algorithms
 4. **The pattern is learnable**: Ask "what state would let me combine partial results?" This question guides discovery
 
 5. **Hardware rewards associativity**: The property aligns with every level of the memory hierarchy and parallel execution
-
-## Exercises
-
-**Exercise 1: Streaming Median**
-
-The median is NOT associative (you can't combine partial medians to get the full median). But you can compute an *approximate* streaming median using the P² algorithm.
-
-(a) Why can't exact median be computed in a streaming fashion with bounded memory?
-(b) Research the P² algorithm. What state does it maintain?
-(c) Implement a streaming approximate median and compare to exact computation.
-
-**Exercise 2: Parallel Histogram**
-
-A histogram counts occurrences in bins. Is histogram computation associative?
-
-(a) Define the state and combine operation for parallel histogram.
-(b) Implement parallel histogram using reduction trees.
-(c) What's the complexity advantage over sequential histogram?
-
-**Exercise 3: Streaming Variance (Welford's Algorithm)**
-
-Variance can be computed in a streaming fashion using Welford's algorithm.
-
-(a) Derive the update equations for mean and variance given a new sample.
-(b) Implement streaming variance and verify it matches the batch computation.
-(c) How does this relate to the parallel scan pattern?
-
-**Exercise 4: Finding Hidden Associativity**
-
-Consider log-sum-exp: $\text{LSE}(x) = \log \sum_i e^{x_i}$
-
-(a) Show that naive computation is numerically unstable for large $x_i$.
-(b) Derive a stable version using $\text{LSE}(x) = m + \log \sum_i e^{x_i - m}$ where $m = \max(x)$.
-(c) What state do you need for streaming log-sum-exp? (Hint: similar to softmax)
 
 ::: {.callout-note}
 ## Try It Yourself

@@ -248,7 +248,6 @@ B[k,j] read (M/T) times, stored once → reuse = M/T = 32×
 
 Effective data movement drops by ~32×. We're no longer memory-bound.
 
-::: {.content-visible when-format="html"}
 ::: {.callout-tip collapse="true"}
 ## Interactive: Tiled Matrix Multiply Visualizer
 
@@ -406,7 +405,6 @@ html`<div style="margin: 20px 0;">
   </div>
 </div>`
 ```
-:::
 :::
 
 ### Benchmark
