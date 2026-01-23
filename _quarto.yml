@@ -78,7 +78,7 @@ format:
       dark: [darkly, custom.scss]
     code-copy: true
     code-fold: false
-    code-tools: true
+    code-tools: false
     toc: true
     toc-depth: 3
     number-sections: true
