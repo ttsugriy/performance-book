@@ -16,9 +16,9 @@ The model still works. How?
 
 This chapter is a case study in **redundancy**—the fifth property from our [Algebraic Framework](00-algebraic-framework.qmd).
 
-When the information content of data is less than its representation size, we have redundancy. Neural network weights contain far less information than their 32-bit encoding suggests. Quantization exploits this gap.
+When the information content of data is less than its representation size, we have redundancy. Neural network weights contain far less information than their 32-bit encoding suggests—a principle rooted in Shannon's information theory [@shannon1948mathematical]. Quantization exploits this gap.
 
-This chapter investigates *why* neural networks tolerate aggressive quantization and how to push further without breaking.
+This chapter investigates *why* neural networks tolerate aggressive quantization and how to push further without breaking. Key methods include LLM.int8() [@dettmers2022llmint8], GPTQ [@frantar2022gptq], and AWQ [@lin2023awq].
 :::
 
 ## The Paradox
@@ -809,6 +809,7 @@ QAT (Quantization-Aware Training):
 
 ## Choosing the Right Method
 
+::: {.content-visible when-format="html"}
 ```{mermaid}
 %%| fig-cap: "Decision tree for choosing a quantization method"
 flowchart TD
@@ -844,6 +845,26 @@ flowchart LR
     style B fill:#fee2e2,stroke:#dc2626
     style C fill:#dcfce7,stroke:#16a34a
 ```
+:::
+
+::: {.content-visible when-format="pdf"}
+**Quantization Method Decision Tree:**
+
+1. Need < 2 bits? Use AQLM or QAT
+2. No calibration data? Use HQQ (zero-shot)
+3. With calibration data:
+   - CPU/Mac: GGUF (llama.cpp)
+   - AMD GPU: GGUF or AWQ
+   - NVIDIA GPU:
+     - High quality: AWQ or GPTQ (group_size=32)
+     - Medium quality: GPTQ (group_size=128)
+     - Low quality: GPTQ (group_size=-1)
+
+**Memory-Constrained Scenarios:**
+
+- Extremely limited: SpQR 3-bit or AQLM 2-bit
+- Otherwise: AWQ or GPTQ 4-bit
+:::
 
 ## Connections
 

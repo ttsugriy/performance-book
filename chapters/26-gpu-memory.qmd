@@ -459,6 +459,7 @@ ds_config = {
 
 ### When to Offload
 
+::: {.content-visible when-format="html"}
 ```{mermaid}
 %%| fig-cap: "Decision tree for GPU memory offloading strategies"
 flowchart TD
@@ -482,6 +483,19 @@ flowchart TD
     style J fill:#f3e8ff,stroke:#9333ea
     style K fill:#fee2e2,stroke:#dc2626
 ```
+:::
+
+::: {.content-visible when-format="pdf"}
+**GPU Memory Offloading Decision Tree:**
+
+1. If model fits in GPU with batch size 1: Try gradient checkpointing
+   - If still OOM: Use smaller batch + gradient accumulation
+   - If still OOM: CPU offload optimizer
+2. If model doesn't fit: Choose offloading strategy
+   - Optimizer-only offload (ZeRO-2): ~2x slowdown
+   - Full offload (ZeRO-3): ~5x slowdown
+   - NVMe offload: ~10x+ slowdown, fits huge models
+:::
 
 ## Mixed Precision Memory Savings
 

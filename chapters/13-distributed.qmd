@@ -367,6 +367,66 @@ Communication speed depends on *which* GPUs are communicating:
 - Pipeline parallel: across nodes (sequential, latency-tolerant)
 - Data parallel: across nodes (large, infrequent all-reduce)
 
+## The Network Layer's Hidden Assumptions
+
+Hardware bandwidth isn't the only communication bottleneck. The network stack itself embeds assumptions that break for ML workloads.
+
+### The Fairness Paradox
+
+Consider TCP congestion control. Its core goal is *fairness*—dividing bandwidth equally among competing flows. This is universally considered good behavior. For web traffic, where flows have independent, competing goals, it is.
+
+DNN training has different goals. Collective operations like all-reduce are *synchronized*—all workers must complete before any can proceed to the next iteration. When multiple training jobs share a cluster, fairness becomes the enemy.
+
+**Why fairness hurts**:
+
+Training jobs communicate in bursts at iteration boundaries. When multiple jobs hit their communication phase simultaneously:
+
+1. Standard congestion control sees competing flows
+2. It fairly divides bandwidth among all flows
+3. *All* jobs slow down together
+4. The slowest job determines iteration time for everyone
+
+The result: congestion precisely when it hurts most, at synchronization points.
+
+### Training-Aware Congestion Control
+
+The fix isn't more bandwidth—it's recognizing that training flows are cooperative, not competitive.
+
+MLTCP [@rajasekaran2024mltcp] augments standard congestion control with a simple insight: scale congestion windows based on bytes sent per training iteration, not per-flow fairness.
+
+```
+Standard congestion control:
+  Flow A: [========]─────────────────
+  Flow B: [========]─────────────────
+          ↑ Both slow, both synchronized → worst case
+
+Training-aware congestion control:
+  Flow A: [================]─────────
+  Flow B: ─────────[================]
+          ↑ Interleaved → both fast
+```
+
+By allowing flows to *interleave* rather than *collide*, training-aware protocols achieve 2-4× speedup on the same hardware.
+
+**Results from MLTCP**:
+
+- Average training iteration time: up to 2× faster
+- 99th percentile iteration time: up to 4× faster
+- Stabilizes competing flows within a few iterations
+
+### The Broader Lesson
+
+Every layer of the stack encodes assumptions:
+
+- **Congestion control assumes** flows have independent, competing goals
+- **Schedulers assume** tasks want fair CPU time
+- **Memory allocators assume** allocation patterns are unpredictable
+- **Caches assume** recently-accessed data will be accessed again
+
+When performance disappoints despite adequate hardware, ask: *what assumption does this layer make that my workload violates?*
+
+For distributed ML training, the network layer's assumption of competitive flows is often the hidden variable limiting performance.
+
 ## Practical Considerations
 
 ### Gradient Accumulation
@@ -472,12 +532,15 @@ Where:
 
 6. **Mixed precision is essential**: 2× memory and 2× speed with careful gradient scaling.
 
+7. **Question every layer's assumptions**: The network stack assumes competitive flows; training jobs are cooperative. When performance disappoints despite good hardware, look for assumption mismatches.
+
 ::: {.callout-note}
 ## Further Reading
 
 - Shoeybi et al. (2019). "Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism"
 - Rajbhandari et al. (2020). "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models"
 - Narayanan et al. (2021). "Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM"
+- Rajasekaran et al. (2022). "MLTCP: Congestion Control for DNN Training" - Training-aware network protocols
 - PyTorch FSDP documentation: https://pytorch.org/docs/stable/fsdp.html
 :::
 

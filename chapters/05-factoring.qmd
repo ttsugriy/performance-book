@@ -473,6 +473,48 @@ Chapter 12 explores LoRA in depth:
 - QLoRA and quantization integration
 - When to use full fine-tuning instead
 
+## Exercises
+
+**Exercise 1: SVD Compression**
+
+Take a random 1000×1000 matrix and compute its SVD.
+
+(a) Plot the singular values. What do you observe about their distribution?
+(b) Compute rank-10, rank-50, and rank-100 approximations. Measure the reconstruction error for each.
+(c) What percentage of singular values are needed to capture 95% of the Frobenius norm?
+
+**Exercise 2: Image Compression with SVD**
+
+Load a grayscale image as a matrix.
+
+(a) Apply SVD and visualize the image reconstructed from rank-5, rank-20, and rank-50 approximations.
+(b) Calculate the compression ratio for each rank (original size vs. stored size).
+(c) At what rank does the image become visually acceptable?
+
+**Exercise 3: LoRA from Scratch**
+
+Implement a simple LoRA layer:
+
+```python
+class LoRALinear(nn.Module):
+    def __init__(self, base_layer, rank=8):
+        # Freeze base_layer.weight
+        # Add trainable A (in_features × rank) and B (rank × out_features)
+        pass
+```
+
+(a) Implement the forward pass: `y = base(x) + x @ A @ B`
+(b) Compare parameter counts: LoRA vs. full layer
+(c) Train on a simple task and verify the frozen weights don't change
+
+**Exercise 4: Separable Convolution**
+
+Implement depthwise separable convolution manually:
+
+(a) Implement a 3×3 depthwise conv followed by 1×1 pointwise conv
+(b) Compare FLOPs with a standard 3×3 conv (same input/output channels)
+(c) Benchmark both implementations—does the FLOP reduction translate to speedup?
+
 ::: {.callout-note}
 ## Try It Yourself
 

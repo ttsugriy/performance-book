@@ -16,7 +16,7 @@ How is this possible?
 
 This chapter is a case study in **separability**—the second property from our [Algebraic Framework](00-algebraic-framework.qmd).
 
-When a structure $A$ can be expressed as $UV^T$ where $U$ and $V$ are much smaller than $A$, we have a separable (low-rank) structure. LoRA's insight is that fine-tuning updates $\Delta W$ are separable: they live in a low-dimensional subspace.
+When a structure $A$ can be expressed as $UV^T$ where $U$ and $V$ are much smaller than $A$, we have a separable (low-rank) structure. LoRA's insight [@hu2021lora] is that fine-tuning updates $\Delta W$ are separable: they live in a low-dimensional subspace.
 
 This chapter investigates *why* fine-tuning is low-rank and how to exploit that structure.
 :::

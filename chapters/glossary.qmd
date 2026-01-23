@@ -49,6 +49,9 @@ This glossary defines key terms used throughout the book. Terms are organized al
 **Latency**
 : Time to complete a single operation or request. Contrast with throughput (operations per second).
 
+**Locality**
+: A property where a function's output depends primarily on nearby inputs. Enables tiling, blocking, and cache-efficient algorithms. Temporal locality (reuse over time) and spatial locality (adjacent access) are the two main forms.
+
 **LoRA (Low-Rank Adaptation)**
 : A fine-tuning technique that freezes pretrained weights and adds trainable low-rank matrices. Exploits the observation that weight updates during fine-tuning are approximately low-rank.
 
@@ -79,6 +82,9 @@ This glossary defines key terms used throughout the book. Terms are organized al
 **Roofline Model**
 : A visual model showing maximum achievable performance as a function of arithmetic intensity. Performance is bounded by min(peak FLOPS, bandwidth × intensity).
 
+**Redundancy**
+: A property where the information content of data is less than its representation size. Enables quantization, compression, caching, and approximation. Shannon's entropy measures true information content.
+
 **Separability**
 : A property where a function can be decomposed into simpler, independent components. Enables factorization optimizations like separable filters and low-rank approximations.
 
@@ -93,6 +99,9 @@ This glossary defines key terms used throughout the book. Terms are organized al
 
 **Streaming Algorithm**
 : An algorithm that processes data in a single pass, maintaining only a small summary state. Enabled by associative operations with bounded state.
+
+**Symmetry**
+: A property where a computation is invariant or equivariant under some transformation. Enables weight sharing (CNNs), Fourier methods, and group equivariant networks. Noether's theorem connects symmetry to conservation laws.
 
 **Tensor Core**
 : Specialized hardware for matrix multiply-accumulate operations. Achieves much higher throughput than standard FP32 cores but requires specific data formats.
@@ -111,17 +120,23 @@ This glossary defines key terms used throughout the book. Terms are organized al
 ::: {.callout-tip}
 ## Cross-Reference Guide
 
-| Concept | Primary Chapter |
-|---------|----------------|
-| Memory hierarchy | Chapter 1 |
-| Bandwidth and roofline | Chapter 2 |
-| Parallelism | Chapter 3 |
-| Associativity and chunking | Chapter 4 |
-| Separability and factoring | Chapter 5 |
-| Sparsity and skipping | Chapter 6 |
-| Locality and tiling | Chapter 7 |
-| FlashAttention | Chapter 10 |
-| LoRA | Chapter 12 |
-| Quantization | Chapter 13 |
-| Measurement | Chapter 15 |
+| Concept | Chapter |
+|---------|---------|
+| Array-oriented thinking | Thinking in Arrays |
+| The six properties | The Algebraic Framework |
+| Memory hierarchy | Memory Hierarchy |
+| Bandwidth and roofline | Bandwidth |
+| Parallelism | Parallelism |
+| GPU architecture | GPU Architecture |
+| Associativity and chunking | Associativity |
+| Separability and factoring | Separability |
+| Locality and tiling | Locality |
+| Sparsity and skipping | Sparsity |
+| Redundancy | Redundancy |
+| Symmetry | Symmetry |
+| FlashAttention | FlashAttention |
+| LoRA | LoRA |
+| Quantization | Quantization |
+| Measurement | The Art of Measurement |
+| Benchmarking best practices | The Art of Measurement |
 :::

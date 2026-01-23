@@ -427,6 +427,8 @@ Is it slow?
 
 5. **Measure first**: Profile to find the bottleneck. If it's not compute-bound, parallelism isn't the answer
 
+6. **Hidden variables abound**: Parallelism introduces hidden variables—NUMA effects, cache contention, scheduler interference—that your mental model may not include. When scaling disappoints, use differential diagnosis (Chapter 16) to isolate which hidden variable is limiting you
+
 ## Connection to Mathematical Properties
 
 In the coming chapters, we'll see how mathematical structure determines parallelizability:

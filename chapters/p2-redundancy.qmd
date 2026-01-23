@@ -30,7 +30,7 @@ This chapter explores how redundancy enables some of the most practical optimiza
 ::: {.callout-tip}
 ## Historical Note: Shannon's Information Theory (1948)
 
-Claude Shannon's "A Mathematical Theory of Communication" formalized the concept of information. His key insight: the *information content* of a message is distinct from its *representation*. A message with predictable patterns carries less information than its bit-length suggests.
+Claude Shannon's "A Mathematical Theory of Communication" [@shannon1948mathematical] formalized the concept of information. His key insight: the *information content* of a message is distinct from its *representation*. A message with predictable patterns carries less information than its bit-length suggests.
 
 Shannon defined entropy as the measure of true information content. When entropy is less than representation size, redundancy exists—and compression is possible. This principle underlies quantization: neural network weights have low entropy (they're structured, not random), so aggressive bit-reduction works.
 :::

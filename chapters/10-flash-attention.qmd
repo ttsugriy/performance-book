@@ -935,6 +935,7 @@ Theoretical peak: 989 TFLOPS (FP16), 1979 TFLOPS (FP8)
 
 ### When to Use Each Version
 
+::: {.content-visible when-format="html"}
 ```{mermaid}
 %%| fig-cap: "Choosing the right FlashAttention version"
 flowchart TD
@@ -952,6 +953,17 @@ flowchart TD
     style F fill:#f3e8ff,stroke:#9333ea
     style G fill:#dcfce7,stroke:#16a34a
 ```
+:::
+
+::: {.content-visible when-format="pdf"}
+**FlashAttention Version Selection:**
+
+- **H100/H200 (Hopper)**: Use FA3
+  - Need FP16 accuracy: FA3 FP16
+  - Can tolerate FP8: FA3 FP8 (2x faster)
+- **A100 (Ampere)**: Use FA2
+- **Older/Non-NVIDIA**: Use FA1 or PyTorch SDPA
+:::
 
 **Quick reference:**
 

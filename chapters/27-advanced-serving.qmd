@@ -350,6 +350,20 @@ def lookahead_decode(model, prompt, n=5):
 
 ## Batch Scheduling Strategies
 
+::: {.callout-warning}
+## The Batching Paradox
+
+Batching improves throughput but hurts latency—a counter-intuitive tradeoff that catches many engineers.
+
+**Why it's counter-intuitive**: Bigger batches amortize overhead and improve GPU utilization. More throughput should mean faster responses, right?
+
+**Why it hurts latency**: A request that arrives while a large batch is processing must wait. If you're the last request added to a batch of 64, you wait for 63 other requests to complete before seeing your first token.
+
+**The hidden variable**: Throughput optimization assumes latency tolerance. Interactive applications don't have it.
+
+This is why production systems need priority scheduling—not all requests can tolerate the latching delay that maximizes throughput.
+:::
+
 ### Priority-Based Scheduling
 
 Not all requests are equal:
@@ -619,7 +633,7 @@ class ModelRouter:
 
 ### Architecture Overview
 
-vLLM is the most widely-deployed open-source LLM serving engine. Understanding its internals helps optimize production deployments.
+vLLM [@kwon2023vllm] is the most widely-deployed open-source LLM serving engine. Understanding its internals helps optimize production deployments.
 
 ```
 vLLM Architecture:

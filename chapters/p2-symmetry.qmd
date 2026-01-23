@@ -30,7 +30,7 @@ Symmetry is why CNNs work for images, why Transformers work for sequences, and w
 ::: {.callout-tip}
 ## Historical Note: Noether's Theorem (1918)
 
-Emmy Noether proved one of the most profound results in physics: **every symmetry corresponds to a conserved quantity**. Translation symmetry implies conservation of momentum. Rotation symmetry implies conservation of angular momentum.
+Emmy Noether proved one of the most profound results in physics [@noether1918invariante]: **every symmetry corresponds to a conserved quantity**. Translation symmetry implies conservation of momentum. Rotation symmetry implies conservation of angular momentum.
 
 This deep connection between symmetry and structure explains why exploiting symmetry is so powerful. When a problem has symmetry, there's hidden structure—and structure enables efficiency. The weight-sharing in CNNs isn't just an engineering trick; it's acknowledging that images have translation symmetry, so a "good feature detector" should work everywhere.
 

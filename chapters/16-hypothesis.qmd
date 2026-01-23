@@ -468,6 +468,73 @@ Sometimes your hypothesis is wrong. That's good—you learned something.
 
 Each failed hypothesis teaches you about the system.
 
+## When Models Lie: Hidden Variables
+
+The roofline model predicts performance from arithmetic intensity. Amdahl's Law predicts scaling from serial fraction. These models are useful—and incomplete.
+
+When measured performance differs from prediction, the gap isn't magic. It's a **hidden variable**—something your model doesn't account for.
+
+### Categories of Hidden Variables
+
+**Hardware hidden variables**: The machine doesn't behave as spec'd.
+
+- Thermal throttling reduces sustained performance below peak burst
+- NUMA places memory on different sockets—"same speed" memory isn't
+- Cache associativity creates conflicts even when total capacity suffices
+- Power limits throttle before compute limits on sustained workloads
+
+**System hidden variables**: The software stack embeds assumptions.
+
+- The OS scheduler moves threads between cores mid-computation
+- The memory allocator fragments the heap over time
+- Congestion control enforces "fairness" between flows that don't want fairness
+- Garbage collection pauses interrupt latency-sensitive paths
+
+**Workload hidden variables**: Your workload differs from the model's assumptions.
+
+- Your access pattern is random where the model assumed sequential
+- Your data distribution triggers edge cases (all zeros, extreme values)
+- Your parallelism creates contention the model assumed away
+- Your batch size is too small to amortize overhead
+
+### The Diagnostic Method: Differential Diagnosis
+
+When your hypothesis fails, isolate the hidden variable:
+
+```
+1. Change one variable
+2. Measure
+3. Did the gap shrink?
+   - Yes → You've found a hidden variable
+   - No  → That wasn't it; try another
+
+Repeat until the gap is explained.
+```
+
+**Example**: Predicted 10× speedup from 10 threads, measured 3×.
+
+```
+Test 1: Pin threads to cores
+        Result: 3.5× (small improvement)
+        Conclusion: Scheduling is a factor, but not the main one
+
+Test 2: Reduce data size to fit in L3 cache
+        Result: 8× (big improvement!)
+        Conclusion: Memory bandwidth saturation is the hidden variable
+
+Fix: Reduce per-thread data footprint or accept bandwidth limit
+```
+
+### The Deeper Lesson
+
+Hidden variables aren't bugs—they're mismatches between your mental model and reality. Every model simplifies. The skill is knowing which simplifications break for your specific situation.
+
+The six properties (associativity, separability, locality, sparsity, redundancy, symmetry) are visible in the math. Hidden variables are invisible in the math but present in the system. Both matter for performance.
+
+When you encounter a counter-intuitive result—parallelism that slows things down, caching that hurts, optimization that backfires—ask: **what assumption does my model make that reality violates?**
+
+The answer is usually a hidden variable.
+
 ## The Art of Good Hypotheses
 
 ### Be Specific

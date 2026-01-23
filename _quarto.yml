@@ -102,6 +102,3 @@ execute:
 
 bibliography: references.bib
 csl: ieee.csl
-
-# For Observable JS interactives
-ojs: true
