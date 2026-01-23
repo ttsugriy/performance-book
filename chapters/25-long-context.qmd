@@ -540,7 +540,9 @@ The accompanying notebook lets you:
 - Compare FA1 vs FA2 vs FA3 performance
 - Experiment with KV cache compression
 
+<!-- Notebook coming soon
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/25-long-context.ipynb)
+-->
 :::
 
 ## Further Reading

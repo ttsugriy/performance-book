@@ -658,7 +658,9 @@ The accompanying notebook lets you:
 - Compare checkpointing strategies
 - Experiment with optimizer memory
 
+<!-- Notebook coming soon
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/26-gpu-memory.ipynb)
+-->
 :::
 
 ## Further Reading

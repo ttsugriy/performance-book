@@ -699,7 +699,9 @@ The accompanying notebook lets you:
 - Explore generated PTX/SASS
 - Experiment with tile sizes and configurations
 
+<!-- Notebook coming soon
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/31-gpu-kernel-frameworks.ipynb)
+-->
 :::
 
 ## Further Reading

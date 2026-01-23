@@ -570,7 +570,9 @@ The accompanying notebook lets you:
 - Compare compilation modes
 - View generated Triton code
 
+<!-- Notebook coming soon
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/29-torch-compile.ipynb)
+-->
 :::
 
 ## Further Reading

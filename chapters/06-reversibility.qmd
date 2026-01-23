@@ -407,7 +407,9 @@ The accompanying notebook lets you:
 - Compare checkpointing strategies
 - Build a mini reversible transformer
 
+<!-- Notebook coming soon
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/06-reversibility.ipynb)
+-->
 :::
 
 ## Further Reading

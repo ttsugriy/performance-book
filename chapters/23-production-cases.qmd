@@ -724,7 +724,9 @@ The accompanying notebook provides:
 - Templates for continuous performance monitoring
 - Regression detection framework
 
+<!-- Notebook coming soon
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/23-production-cases.ipynb)
+-->
 :::
 
 ## Further Reading

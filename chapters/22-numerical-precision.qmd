@@ -528,7 +528,9 @@ The accompanying notebook lets you:
 - Diagnose and fix common numerical issues
 - Measure the speed/accuracy trade-off
 
+<!-- Notebook coming soon
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/22-numerical-precision.ipynb)
+-->
 :::
 
 ## Further Reading
