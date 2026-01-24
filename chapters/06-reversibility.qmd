@@ -398,6 +398,190 @@ For a 64-layer network with 1GB per layer:
 (b) What's the optimal checkpointing interval if you have 16GB?
 (c) How does compute overhead compare to reversible layers?
 
+::: {.callout-tip collapse="true"}
+## Solutions
+
+**Exercise 1: Verify Reversibility**
+
+```python
+import torch
+import torch.nn as nn
+
+def reversible_forward(x1, x2, F, G):
+    y1 = x1 + F(x2)
+    y2 = x2 + G(y1)
+    return y1, y2
+
+def reversible_inverse(y1, y2, F, G):
+    x2 = y2 - G(y1)
+    x1 = y1 - F(x2)
+    return x1, x2
+
+# Test with float32 and float16
+for dtype in [torch.float32, torch.float16]:
+    F = nn.Sequential(nn.Linear(256, 256), nn.ReLU(), nn.Linear(256, 256)).to(dtype)
+    G = nn.Sequential(nn.Linear(256, 256), nn.ReLU(), nn.Linear(256, 256)).to(dtype)
+
+    x1 = torch.randn(32, 256, dtype=dtype)
+    x2 = torch.randn(32, 256, dtype=dtype)
+
+    y1, y2 = reversible_forward(x1, x2, F, G)
+    x1_rec, x2_rec = reversible_inverse(y1, y2, F, G)
+
+    error = max((x1 - x1_rec).abs().max(), (x2 - x2_rec).abs().max())
+    print(f"{dtype}: max error = {error:.2e}")
+    # float32: ~1e-7, float16: ~1e-3 to 1e-2
+```
+
+**(a)** With float16, reconstruction error is ~1000× larger than float32 due to reduced mantissa precision (10 bits vs 23 bits).
+
+**(b)** Error accumulation across 10 layers:
+
+```python
+# Track error accumulation through layers
+errors = []
+for n_layers in range(1, 11):
+    x1, x2 = torch.randn(32, 256), torch.randn(32, 256)
+    original_x1, original_x2 = x1.clone(), x2.clone()
+
+    # Forward through n layers
+    Fs = [nn.Sequential(nn.Linear(256, 256), nn.ReLU()) for _ in range(n_layers)]
+    Gs = [nn.Sequential(nn.Linear(256, 256), nn.ReLU()) for _ in range(n_layers)]
+
+    for F, G in zip(Fs, Gs):
+        x1, x2 = reversible_forward(x1, x2, F, G)
+
+    # Inverse through n layers (reverse order)
+    for F, G in zip(reversed(Fs), reversed(Gs)):
+        x1, x2 = reversible_inverse(x1, x2, F, G)
+
+    error = max((original_x1 - x1).abs().max(), (original_x2 - x2).abs().max())
+    errors.append(error.item())
+    print(f"Layers {n_layers}: error = {error:.2e}")
+```
+
+Error grows roughly linearly with depth for float32 (~1e-7 per layer), but can grow super-linearly for float16 due to catastrophic cancellation in subtraction.
+
+---
+
+**Exercise 2: Memory Measurement**
+
+```python
+import torch
+import torch.nn as nn
+
+class StandardBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            nn.Sequential(nn.Linear(dim, dim), nn.ReLU())
+            for _ in range(20)
+        ])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = x + layer(x)  # Stores 20 intermediate activations
+        return x
+
+class ReversibleBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.F_layers = nn.ModuleList([
+            nn.Sequential(nn.Linear(dim//2, dim//2), nn.ReLU())
+            for _ in range(20)
+        ])
+        self.G_layers = nn.ModuleList([
+            nn.Sequential(nn.Linear(dim//2, dim//2), nn.ReLU())
+            for _ in range(20)
+        ])
+
+    def forward(self, x):
+        x1, x2 = x.chunk(2, dim=-1)
+        for F, G in zip(self.F_layers, self.G_layers):
+            y1 = x1 + F(x2)
+            y2 = x2 + G(y1)
+            x1, x2 = y1, y2
+        return torch.cat([x1, x2], dim=-1)
+
+# Measure memory
+torch.cuda.reset_peak_memory_stats()
+model = StandardBlock(512).cuda()
+x = torch.randn(64, 512).cuda()
+y = model(x)
+y.sum().backward()
+standard_mem = torch.cuda.max_memory_allocated() / 1e6
+
+torch.cuda.reset_peak_memory_stats()
+model = ReversibleBlock(512).cuda()
+x = torch.randn(64, 512).cuda()
+y = model(x)
+y.sum().backward()
+reversible_mem = torch.cuda.max_memory_allocated() / 1e6
+
+print(f"Standard: {standard_mem:.1f} MB, Reversible: {reversible_mem:.1f} MB")
+print(f"Ratio: {standard_mem/reversible_mem:.1f}x")
+```
+
+**(c)** Memory ratio increases with batch size because activation storage dominates. At small batch sizes, weights dominate; at large batch sizes, you'll see closer to the theoretical L× reduction.
+
+---
+
+**Exercise 3: Non-Additive Coupling**
+
+**(a)** For $y = x \cdot f(\text{other})$ to be invertible, we need $f(\text{other}) \neq 0$ everywhere. The inverse is $x = y / f(\text{other})$.
+
+**(b)** Safe multiplicative coupling:
+
+```python
+def multiplicative_coupling_forward(x1, x2, scale_fn, eps=1e-6):
+    """Affine coupling: y2 = x2 * exp(s(x1)) + t(x1)"""
+    s = scale_fn(x1)
+    # Use exp to ensure positive scaling (never zero)
+    y1 = x1
+    y2 = x2 * torch.exp(s)  # exp(s) > 0 always
+    return y1, y2
+
+def multiplicative_coupling_inverse(y1, y2, scale_fn, eps=1e-6):
+    s = scale_fn(y1)
+    x1 = y1
+    x2 = y2 * torch.exp(-s)
+    return x1, x2
+```
+
+**(c)** Multiplicative coupling is preferred in normalizing flows because:
+
+1. **Tractable Jacobian**: $\det(J) = \exp(\sum s_i)$, easy to compute for likelihood
+2. **Expressiveness**: Scale transformations capture different data structures than additive shifts
+3. **Stable training**: The exp/log parameterization avoids numerical instability
+
+RevNets don't use multiplicative coupling because they don't need tractable Jacobians—they just need invertibility. Addition is simpler and avoids potential numerical issues with very large or small scales.
+
+---
+
+**Exercise 4: Checkpointing Strategy**
+
+**(a)** Full storage: $64 \times 1\text{GB} = 64\text{GB}$
+
+**(b)** With 16GB memory and checkpointing every k layers:
+
+- Memory usage: $L/k = 64/k$ GB for checkpoints, plus activations for k layers between checkpoints
+- Total: $64/k + k$ GB (approximately)
+- Minimize $64/k + k$: take derivative, set to 0: $-64/k^2 + 1 = 0 \Rightarrow k = 8$
+- With $k=8$: need $64/8 + 8 = 8 + 8 = 16$ GB ✓
+
+Optimal checkpoint interval is **k=8** (checkpoint every 8 layers), storing 8 checkpoints.
+
+**(c)** Compute overhead comparison:
+
+- **Checkpointing (k=8)**: Recompute 7 layers between each checkpoint during backward. Overhead ≈ $(k-1)/k = 7/8 \approx 87.5\%$
+
+- **Reversible**: Recompute each layer during backward. Overhead ≈ 33-50% (depends on F, G complexity relative to full layer)
+
+Reversible layers have **lower compute overhead** (33-50% vs 87.5%) but require architectural changes. Checkpointing works with any architecture but has higher overhead when memory is severely constrained.
+
+The crossover point: if you have enough memory for $\sqrt{L}$ checkpoints, checkpointing overhead is ~100%. Reversible is better when memory is critically limited and the 33-50% overhead is acceptable.
+:::
+
 ::: {.callout-note}
 ## Try It Yourself
 

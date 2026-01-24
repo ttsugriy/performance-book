@@ -516,6 +516,91 @@ Implement depthwise separable convolution manually:
 (b) Compare FLOPs with a standard 3×3 conv (same input/output channels)
 (c) Benchmark both implementations—does the FLOP reduction translate to speedup?
 
+::: {.callout-tip collapse="true"}
+## Solutions
+
+**Exercise 1: SVD Compression**
+
+(a) **Singular value distribution**: You'll observe that singular values decay rapidly—often exponentially. A random 1000×1000 matrix typically has most of its "energy" (Frobenius norm) concentrated in the top 50-100 singular values. This decay is even more pronounced in structured data like trained weight matrices.
+
+(b) **Reconstruction errors**: For a random matrix:
+- Rank-10: ~90% error (captures only 10% of variance)
+- Rank-50: ~50% error
+- Rank-100: ~10% error
+
+For structured matrices (like trained neural network weights), the decay is faster, so low-rank approximations work better.
+
+(c) **95% of Frobenius norm**: Typically 10-20% of singular values capture 95% of the norm for structured matrices. For purely random matrices, you need more (~50%). This is why LoRA works—trained weights are far from random.
+
+**Exercise 2: Image Compression with SVD**
+
+(a) Visual quality progression:
+- Rank-5: Blurry, major features visible
+- Rank-20: Recognizable, some detail
+- Rank-50: Near-original quality for most images
+
+(b) Compression ratios for an M×N image:
+- Original: M × N values
+- Rank-r: r × (M + N + 1) values (U, V, singular values)
+- Rank-50 on 1000×1000: 50 × 2001 ≈ 100K vs 1M original = 10× compression
+
+(c) "Visually acceptable" is typically rank 20-50 for natural images, demonstrating that images have low effective rank.
+
+**Exercise 3: LoRA from Scratch**
+
+```python
+class LoRALinear(nn.Module):
+    def __init__(self, base_layer, rank=8, alpha=16):
+        super().__init__()
+        self.base = base_layer
+        self.base.weight.requires_grad = False  # Freeze
+
+        in_features = base_layer.in_features
+        out_features = base_layer.out_features
+
+        # A: in_features → rank, B: rank → out_features
+        self.A = nn.Parameter(torch.randn(in_features, rank) * 0.01)
+        self.B = nn.Parameter(torch.zeros(rank, out_features))
+        self.scale = alpha / rank
+
+    def forward(self, x):
+        base_out = self.base(x)
+        lora_out = (x @ self.A @ self.B) * self.scale
+        return base_out + lora_out
+```
+
+(b) Parameter comparison for 4096×4096 layer with rank 8:
+- Full: 16.7M parameters
+- LoRA: 8 × (4096 + 4096) = 65K parameters (0.4%)
+
+(c) After training, verify `base_layer.weight.grad is None` to confirm freezing worked.
+
+**Exercise 4: Separable Convolution**
+
+(a) Implementation sketch:
+```python
+# Depthwise: each channel convolved separately
+depthwise = nn.Conv2d(C, C, 3, groups=C, padding=1)
+# Pointwise: mix channels
+pointwise = nn.Conv2d(C, C, 1)
+# Combined
+output = pointwise(depthwise(input))
+```
+
+(b) FLOP comparison for C channels, H×W spatial:
+- Standard 3×3: 9 × C × C × H × W
+- Separable: 9 × C × H × W + C × C × H × W = (9 + C) × C × H × W
+
+Ratio: 9C²/(9+C)C = 9C/(9+C) ≈ 9× fewer FLOPs for large C (e.g., C=512 gives 8.8× reduction)
+
+(c) Speedup is typically 2-4× rather than 9× because:
+- Depthwise conv has poor arithmetic intensity (memory-bound)
+- Two kernel launches instead of one
+- Less cache reuse between operations
+
+This illustrates that FLOPs ≠ time—memory access patterns matter.
+:::
+
 ::: {.callout-note}
 ## Try It Yourself
 

@@ -532,6 +532,50 @@ Prefix Caching             Redundancy          Locality (LRU)
 
 5. **Novel optimization:** Consider beam search in language models. What properties might enable more efficient implementations?
 
+::: {.callout-tip collapse="true"}
+## Solutions
+
+**1. PagedAttention exploits sparsity.**
+
+PagedAttention avoids pre-allocating contiguous memory for the maximum possible sequence length. Instead, it allocates memory in pages only as needed. This is sparsity applied to memory allocation—most sequences don't use their maximum allocation, so don't pay for it. The "sparse" pattern here is that actual memory usage << worst-case memory usage.
+
+**2. Ring-style parallelism applies to any associative operation:**
+
+- **All-reduce**: Sum gradients across GPUs in a ring
+- **Prefix scan**: Distributed parallel prefix sums
+- **Convolutions**: Halo exchange patterns for spatial parallelism
+- **Matrix multiply**: Cannon's algorithm uses ring communication
+- **Any monoid operation**: If it's associative with identity, it can be chunked and combined
+
+The key insight: ring communication pipelines data movement with computation. Any operation where partial results can be incrementally combined benefits.
+
+**3. Separability + Sparsity examples:**
+
+- **Structured pruning**: Remove entire channels/heads (sparsity) that can be factored out (separability). A pruned attention head is both sparse (removed) and separable (independent of other heads).
+- **LoRA with sparse adapters**: Low-rank adaptation (separability) where the low-rank matrices are themselves sparse.
+- **Block-sparse matrix factorization**: Factor a matrix into low-rank components that are also block-sparse.
+
+**4. Counterexample: Truly irregular computations**
+
+Consider graph neural networks on power-law graphs with random node features and non-associative aggregation (like attention with data-dependent routing). Each node has different degree, neighbors are essentially random, and the computation can't be reordered.
+
+*Implications*: When no properties apply, optimization is limited to:
+- Hardware-level tricks (better memory access patterns)
+- Approximations that introduce structure (sampling, quantization)
+- Accepting that some computations are inherently expensive
+
+This is rare in practice—most computations *do* have exploitable structure.
+
+**5. Beam search optimizations:**
+
+- **Redundancy**: Beams share common prefixes. Use prefix caching to avoid recomputing attention for shared tokens. KV cache sharing across beams exploits this.
+- **Locality**: Beams that diverge recently have similar KV caches. Process similar beams together.
+- **Sparsity**: Most tokens have low probability. Speculative decoding prunes the search space early.
+- **Associativity**: Score computation can be parallelized across beams.
+
+Speculative decoding is particularly powerful: use a small model to predict likely continuations (sparse candidates), then verify in parallel with the large model.
+:::
+
 ## Key Takeaways
 
 1. **Properties explain optimizations.** Every speedup traces to mathematical structure.

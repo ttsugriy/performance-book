@@ -508,6 +508,137 @@ This process works for any optimization problem:
 
 4. **Measurement**: Profile a computation in your own codebase. What's the bottleneck? Which property might help?
 
+::: {.callout-tip collapse="true"}
+## Solutions
+
+**Exercise 1: Property Identification**
+
+To reduce attention from O(n²) to O(n), you can exploit:
+
+1. **Sparsity** - Sparse attention patterns (e.g., local windows, strided patterns, Big Bird):
+   - Instead of attending to all n tokens, each token attends to only O(1) or O(log n) others
+   - Examples: Longformer (local + global), Sparse Transformer (strided patterns)
+
+2. **Separability** (Low-rank approximation):
+   - Linformer projects keys/values to lower dimension: O(n × d × k) where k << n
+   - Performer uses random features to approximate softmax: O(n × d)
+
+3. **Locality**:
+   - FlashAttention exploits locality by tiling Q, K, V into blocks that fit in SRAM
+   - Doesn't change asymptotic complexity but dramatically improves constants
+
+4. **Associativity** (for state-space alternatives):
+   - Mamba replaces attention with a linear recurrence that can be parallelized
+   - The recurrence is associative → parallel scan → O(n log n) with high parallelism
+
+The most successful approaches combine multiple properties: FlashAttention uses locality + associativity of softmax normalization; Mamba uses associativity + separability (low-rank state).
+
+---
+
+**Exercise 2: Parallel Prefix Sum Derivation**
+
+Given n elements $[a_0, a_1, ..., a_{n-1}]$, compute prefix sums $[s_0, s_1, ..., s_{n-1}]$ where $s_i = \sum_{j=0}^{i} a_j$.
+
+**Sequential**: $s_0 = a_0$, $s_i = s_{i-1} + a_i$ — O(n) sequential steps.
+
+**Parallel (Blelloch scan)**:
+
+*Up-sweep (reduce)*: Build a tree of partial sums
+
+```
+Level 0: a₀  a₁  a₂  a₃  a₄  a₅  a₆  a₇
+Level 1: a₀ (a₀+a₁) a₂ (a₂+a₃) a₄ (a₄+a₅) a₆ (a₆+a₇)
+Level 2: a₀ (a₀+a₁) a₂ (a₀..a₃) a₄ (a₄+a₅) a₆ (a₄..a₇)
+Level 3: a₀ (a₀+a₁) a₂ (a₀..a₃) a₄ (a₄+a₅) a₆ (a₀..a₇)
+```
+
+*Down-sweep*: Distribute results back down
+
+```
+Replace root with 0, propagate: left child gets parent, right gets parent + old left
+```
+
+**Depth**: $2 \log_2(n)$ parallel steps (log n for up-sweep, log n for down-sweep)
+
+**Work**: O(n) total operations, but only O(log n) sequential steps
+
+---
+
+**Exercise 3: Many Small Matrix Multiplies**
+
+**Property**: **Associativity** (and **locality**)
+
+**Optimizations to try**:
+
+1. **Batched GEMM**: Combine small matmuls into a single batched operation
+   ```python
+   # Instead of:
+   for W in weights:
+       x = x @ W
+
+   # Use batched:
+   x = torch.bmm(x_batched, W_stacked)
+   ```
+
+2. **Fusion**: Fuse the sequence of matmuls with preceding/following operations
+   ```python
+   # torch.compile can fuse:
+   @torch.compile
+   def fused_mlp(x, W1, W2, W3):
+       return gelu(x @ W1) @ W2 @ W3
+   ```
+
+3. **Pre-multiply** (if shapes allow): Use associativity to reduce runtime work
+   ```python
+   # If W1, W2 are constant:
+   W_combined = W1 @ W2  # Precompute once
+   y = x @ W_combined    # Apply combined
+   ```
+
+4. **Tensor cores**: Ensure dimensions are multiples of 8/16 for efficient tensor core usage
+
+The key insight: many small operations create kernel launch overhead and poor GPU utilization. Batching exploits parallelism; fusion exploits locality.
+
+---
+
+**Exercise 4: Profiling Your Codebase**
+
+This is an open-ended exercise. Here's a framework for approaching it:
+
+**Step 1: Profile end-to-end**
+```python
+# PyTorch profiler
+with torch.profiler.profile(
+    activities=[torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA],
+    record_shapes=True,
+    with_stack=True
+) as prof:
+    your_function()
+
+print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+```
+
+**Step 2: Identify bottleneck type**
+- If top operations are matmul/conv: **compute-bound** → check if you're hitting roofline
+- If top time is in memory ops or small kernels: **memory-bound** → consider fusion
+- If many kernel launches: **launch overhead** → consider batching or fusion
+
+**Step 3: Match property to bottleneck**
+
+| Bottleneck | Property | Technique |
+|------------|----------|-----------|
+| Sequential loop | Associativity | Parallel scan |
+| Large tensors | Separability | Low-rank factorization |
+| Many small ops | Locality | Fusion |
+| Dense computation | Sparsity | Pruning, skip connections |
+| Redundant computation | Redundancy | Caching, quantization |
+| Repeated structure | Symmetry | Weight sharing, FFT |
+
+**Step 4: Implement and measure**
+Always verify speedup with wall-clock time, not just FLOPS or theoretical analysis.
+:::
+
 ---
 
 This capstone demonstrates that the framework isn't just theoretical—it's a practical methodology for deriving optimizations. The properties are your vocabulary; the methodology is your grammar.
