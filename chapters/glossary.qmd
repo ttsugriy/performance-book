@@ -1,3 +1,7 @@
+---
+id: sec-glossary
+---
+
 # Glossary {.unnumbered}
 
 This glossary defines key terms used throughout the book. Terms are organized alphabetically.

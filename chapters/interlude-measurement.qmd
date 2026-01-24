@@ -1,3 +1,7 @@
+---
+id: sec-interlude-measurement
+---
+
 # Interlude: A Measurement Mindset {.unnumbered}
 
 Before we dive into the mathematical properties that enable optimization, we need to establish a crucial skill: the ability to measure performance accurately. This brief interlude introduces the mindset you'll need for the investigations ahead.

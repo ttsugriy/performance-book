@@ -392,7 +392,7 @@ The result: congestion precisely when it hurts most, at synchronization points.
 
 The fix isn't more bandwidth—it's recognizing that training flows are cooperative, not competitive.
 
-MLTCP [@rajasekaran2024mltcp] augments standard congestion control with a simple insight: scale congestion windows based on bytes sent per training iteration, not per-flow fairness.
+MLTCP [@rajasekaran2022mltcp] augments standard congestion control with a simple insight: scale congestion windows based on bytes sent per training iteration, not per-flow fairness.
 
 ```
 Standard congestion control:

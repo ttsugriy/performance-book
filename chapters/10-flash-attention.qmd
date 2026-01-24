@@ -1,6 +1,7 @@
 ---
 title: "Investigation: FlashAttention"
 subtitle: "Deriving the Algorithm That Changed Transformers"
+id: sec-flash-attention
 ---
 
 ::: {.chapter-opener}

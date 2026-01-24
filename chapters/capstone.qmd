@@ -1,6 +1,7 @@
 ---
 title: "Capstone: Optimizing a Novel Problem"
 subtitle: "Applying the Framework from Scratch"
+id: sec-capstone
 ---
 
 ::: {.chapter-opener}

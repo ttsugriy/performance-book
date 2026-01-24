@@ -1,6 +1,7 @@
 ---
 title: "Reversibility"
 subtitle: "How Invertibility Enables Memory-Efficient Training"
+id: sec-reversibility
 ---
 
 ::: {.chapter-opener}

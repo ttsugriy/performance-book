@@ -1,6 +1,7 @@
 ---
 title: "Locality"
 subtitle: "Why Nearby Data Matters"
+id: sec-locality
 ---
 
 ::: {.chapter-opener}

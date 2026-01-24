@@ -1,6 +1,7 @@
 ---
 title: "Separability"
 subtitle: "When Big Computations Decompose Into Small Ones"
+id: sec-separability
 ---
 
 ::: {.chapter-opener}

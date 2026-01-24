@@ -1,6 +1,7 @@
 ---
 title: "Investigation: Quantization"
 subtitle: "Why 4 Bits Can Do the Work of 32"
+id: sec-quantization
 ---
 
 ::: {.chapter-opener}

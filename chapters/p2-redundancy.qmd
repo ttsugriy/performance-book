@@ -1,6 +1,7 @@
 ---
 title: "Redundancy"
 subtitle: "When Less Information Means More Speed"
+id: sec-redundancy
 ---
 
 ::: {.chapter-opener}

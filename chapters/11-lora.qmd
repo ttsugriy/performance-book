@@ -1,6 +1,7 @@
 ---
 title: "Investigation: LoRA"
 subtitle: "The Low-Rank Structure of Fine-Tuning"
+id: sec-lora
 ---
 
 ::: {.chapter-opener}

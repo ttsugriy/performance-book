@@ -17,6 +17,7 @@ book:
       chapters:
         - chapters/00a-thinking-in-arrays.qmd
         - chapters/00-algebraic-framework.qmd
+        - chapters/interlude-measurement.qmd
     - part: "Part I: The Hardware Reality"
       chapters:
         - chapters/01-memory-hierarchy.qmd

@@ -1,6 +1,7 @@
 ---
 title: "Sparsity"
 subtitle: "The Art of Not Computing"
+id: sec-sparsity
 ---
 
 ::: {.chapter-opener}

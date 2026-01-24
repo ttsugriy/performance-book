@@ -1,6 +1,7 @@
 ---
 title: "Investigation: Matrix Multiply"
 subtitle: "Why This Operation Rules Modern Computing"
+id: sec-matrix-multiply
 ---
 
 ::: {.chapter-opener}

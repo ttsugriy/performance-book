@@ -1,6 +1,7 @@
 ---
 title: "Thinking in Arrays"
 subtitle: "The Mental Model That Makes Performance Visible"
+id: sec-thinking-in-arrays
 ---
 
 ::: {.chapter-opener}

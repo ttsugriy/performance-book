@@ -1,6 +1,7 @@
 ---
 title: "Associativity"
 subtitle: "How Regrouping Enables Parallelism and Streaming"
+id: sec-associativity
 ---
 
 ::: {.chapter-opener}
