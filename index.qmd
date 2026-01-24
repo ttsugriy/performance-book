@@ -246,6 +246,9 @@ Reverse-engineer neural networks to understand their internal algorithms. Featur
 ⚡ **The Algebra of Speed** *(You are here)*
 Mathematical foundations of computational performance. Why FlashAttention, LoRA, and quantization work—and how to recognize when similar optimizations apply to your problems.
 
+🌐 **[Distributed Training from First Principles](https://ttsugriy.github.io/distributed-training-book/)**
+Deep dive into distributed training—data parallelism, tensor parallelism, pipeline parallelism, and beyond. The natural continuation of this book's distributed chapter.
+
 ### Blog
 
 ✍️ **[Software Bits](https://softwarebits.substack.com/)** — Short, focused essays on performance, ML, and computer science fundamentals. Subscribe for updates.

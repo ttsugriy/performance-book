@@ -537,6 +537,7 @@ Where:
 ::: {.callout-note}
 ## Further Reading
 
+- **[Distributed Training from First Principles](https://ttsugriy.github.io/distributed-training-book/)** - A comprehensive deep-dive into distributed training, covering everything from data parallelism to expert parallelism
 - Shoeybi et al. (2019). "Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism"
 - Rajbhandari et al. (2020). "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models"
 - Narayanan et al. (2021). "Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM"
