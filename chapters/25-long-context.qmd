@@ -463,18 +463,229 @@ Quality impact: Usually <1% perplexity degradation
 
 ### Positional Encodings for Long Context
 
-Standard positional encodings fail at lengths beyond training:
+Attention is permutation-equivariant—the same output for any ordering of tokens. For sequences, we *need* position to matter. Position encodings break this symmetry intentionally.
+
+But for long contexts, the choice of positional encoding becomes critical.
+
+#### The Problem with Traditional Approaches
 
 ```
-Learned positions: Limited to training length
-Sinusoidal: Extrapolates poorly
-RoPE: Better extrapolation, but still degrades
+Learned positions:
+  - Fixed vocabulary of positions (e.g., 0-2047)
+  - Cannot extrapolate beyond training length
+  - Must retrain for longer contexts
 
-Solutions:
-- RoPE with NTK-aware scaling
-- YaRN (Yet another RoPE extension)
-- ALiBi (relative positions via bias)
+Sinusoidal positions:
+  - Can represent any position mathematically
+  - But attention patterns learned on positions 0-2047
+    don't generalize to position 100,000
+  - The model hasn't learned what "far away" means
 ```
+
+The fundamental issue: traditional position encodings encode *absolute* position. But attention really cares about *relative* position—how far apart are two tokens?
+
+#### Rotary Position Embeddings (RoPE)
+
+RoPE solves this elegantly using **rotation matrices**. The key insight: rotations naturally encode relative position through their composition properties.
+
+**The Mathematical Foundation**
+
+A 2D rotation matrix has the form:
+
+$$R(\theta) = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix}$$
+
+Rotation matrices have special properties that make them perfect for positional encoding:
+
+| Property | Mathematical Form | Why It Enables RoPE |
+|----------|------------------|---------------------|
+| **Orthogonality** | $R^T R = I$ | Preserves vector norms and dot products |
+| **Relative composition** | $R_m^T R_n = R_{n-m}$ | Relative position from absolute |
+| **Commutativity** | $R_\theta R_\phi = R_{\theta+\phi}$ | Positions compose cleanly |
+
+The crucial property is the second one. When we compute attention between positions $m$ and $n$:
+
+$$(R_m q)^T (R_n k) = q^T R_m^T R_n k = q^T R_{n-m} k$$
+
+The absolute positions $m$ and $n$ vanish—only the relative position $n-m$ remains. This is exactly what we want for attention.
+
+**Applying Rotation to Embeddings**
+
+RoPE treats consecutive pairs of embedding dimensions as 2D vectors and rotates each pair:
+
+```python
+def rope_embedding(x, positions, base=10000):
+    """
+    Apply Rotary Position Embedding to input tensor.
+
+    x: [batch, seq, heads, head_dim]
+    positions: [seq] - position indices
+    """
+    head_dim = x.shape[-1]
+
+    # Different frequency for each dimension pair
+    # Lower dimensions = lower frequency = longer wavelength
+    dim_pairs = head_dim // 2
+    freqs = 1.0 / (base ** (torch.arange(0, dim_pairs) / dim_pairs))
+
+    # Compute rotation angles: position × frequency
+    # [seq, dim_pairs]
+    angles = positions.unsqueeze(-1) * freqs.unsqueeze(0)
+
+    # Apply rotation to each pair of dimensions
+    x_pairs = x.view(*x.shape[:-1], dim_pairs, 2)
+
+    cos = torch.cos(angles)
+    sin = torch.sin(angles)
+
+    # Rotation: [x, y] → [x·cos - y·sin, x·sin + y·cos]
+    x_rot = torch.stack([
+        x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
+        x_pairs[..., 0] * sin + x_pairs[..., 1] * cos
+    ], dim=-1)
+
+    return x_rot.view(*x.shape)
+```
+
+**Multi-Frequency Encoding**
+
+Each dimension pair uses a different rotation frequency:
+
+```
+Dimension pair 0: θ = position × (1 / base^0)     = position
+Dimension pair 1: θ = position × (1 / base^(1/d))
+Dimension pair 2: θ = position × (1 / base^(2/d))
+...
+Dimension pair d: θ = position × (1 / base^1)     = position / base
+
+Low dimensions:  Fast rotation, fine position detail
+High dimensions: Slow rotation, coarse position info
+```
+
+This is analogous to Fourier features or the sinusoidal encoding—but applied through rotations that preserve the relative-position property.
+
+**Why RoPE Works Better for Long Contexts**
+
+The relative-position formulation helps RoPE extrapolate:
+
+```
+Traditional absolute position:
+  - Train on positions 0-4096
+  - Position 10000 is "unknown" to the model
+
+RoPE relative position:
+  - Train on relative distances -4096 to +4096
+  - At position 10000, nearby tokens still have
+    familiar relative distances
+  - Long-range attention may degrade, but
+    local attention remains well-calibrated
+```
+
+#### RoPE Extensions for Extreme Lengths
+
+Even RoPE degrades beyond training length. Several extensions address this:
+
+**NTK-Aware Scaling**
+
+Key insight: don't just interpolate positions—adjust the frequency base.
+
+```python
+def ntk_aware_scaling(base, scale_factor, dim):
+    """
+    NTK-aware interpolation: adjust base frequency for length extension.
+
+    Instead of: position → position / scale_factor (interpolation)
+    Do:         base → base × scale_factor^(dim/(dim-2))
+    """
+    # This preserves relative position resolution better
+    # than naive position interpolation
+    alpha = scale_factor ** (dim / (dim - 2))
+    return base * alpha
+```
+
+The intuition: NTK (Neural Tangent Kernel) theory suggests the frequency spectrum matters. Naive interpolation compresses high frequencies too aggressively; NTK-aware scaling maintains the frequency distribution better.
+
+**YaRN (Yet another RoPE extensioN)**
+
+YaRN combines multiple techniques:
+
+1. **NTK-aware interpolation** for the base frequency
+2. **Attention scaling** to compensate for longer contexts
+3. **Dimension-dependent interpolation** (different scaling per frequency)
+
+```python
+def yarn_scale_factor(dim_idx, dim, scale, alpha=1, beta=32):
+    """
+    YaRN: dimension-dependent interpolation factor.
+
+    Low-frequency dimensions: interpolate more aggressively
+    High-frequency dimensions: preserve more (local info)
+    """
+    # Linear ramp from 0 to 1 based on dimension
+    ramp = (dim_idx / dim - alpha) / (beta - alpha)
+    ramp = min(1, max(0, ramp))
+
+    # Blend between no scaling and full scaling
+    return 1 / (1 - ramp + ramp * scale)
+```
+
+**ALiBi (Attention with Linear Biases)**
+
+A different approach: don't modify embeddings, add position bias directly to attention scores.
+
+```python
+def alibi_attention(Q, K, V, num_heads):
+    """
+    ALiBi: add linear position bias to attention.
+    """
+    seq_len = Q.shape[1]
+
+    # Relative position matrix
+    positions = torch.arange(seq_len)
+    relative_pos = positions.unsqueeze(0) - positions.unsqueeze(1)
+
+    # Different slope per head (geometric sequence)
+    slopes = 2 ** (-8 / num_heads * torch.arange(1, num_heads + 1))
+
+    # Attention scores with position bias
+    scores = Q @ K.transpose(-1, -2) / sqrt(d)
+
+    # Add negative bias for distant positions
+    # (encourages attending to nearby tokens)
+    for h, slope in enumerate(slopes):
+        scores[:, h] -= slope * torch.abs(relative_pos)
+
+    return softmax(scores, dim=-1) @ V
+```
+
+ALiBi's advantages:
+- No learned parameters for position
+- Naturally handles any length (bias is mathematically defined)
+- Different heads specialize in different ranges
+
+**Choosing Your Approach**
+
+```
+Approach    Extrapolation    Compute Cost    Compatibility
+─────────────────────────────────────────────────────────
+Learned     None             Cheap           N/A beyond train length
+Sinusoidal  Poor             Cheap           Degrades badly
+RoPE        Moderate         Cheap           Good local, degrades long
+RoPE+NTK    Good             Cheap           Minor fine-tuning helps
+YaRN        Very Good        Cheap           Best with fine-tuning
+ALiBi       Excellent        Cheap           No fine-tuning needed
+```
+
+::: {.callout-note}
+## Connection to Symmetry
+
+RoPE is a beautiful example of exploiting **rotation symmetry** (see [Chapter: Symmetry](p2-symmetry.qmd)). The SO(2) rotation group has exactly the properties needed for relative positional encoding:
+
+- Orthogonality preserves the geometry of attention
+- Group composition ($R_m^T R_n = R_{n-m}$) naturally encodes relative position
+- The continuous nature of rotation enables smooth interpolation
+
+This is why rotation matrices specifically—not arbitrary transformations—work so well. The algebraic structure of the rotation group matches the structure of what we want to compute.
+:::
 
 ### Memory-Efficient Training
 
@@ -552,3 +763,7 @@ The accompanying notebook lets you:
 - Liu et al. (2023). "Ring Attention with Blockwise Transformers for Near-Infinite Context"
 - Zhang et al. (2023). "H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models"
 - Xiao et al. (2023). "Efficient Streaming Language Models with Attention Sinks"
+- Su et al. (2021). "RoFormer: Enhanced Transformer with Rotary Position Embedding"
+- Peng et al. (2023). "YaRN: Efficient Context Window Extension of Large Language Models"
+- Press et al. (2022). "Train Short, Test Long: Attention with Linear Biases Enables Input Length Generalization" (ALiBi)
+- bloc97 (2023). "NTK-Aware Scaled RoPE allows LLaMA models to have extended context" (Reddit post that introduced NTK-aware scaling)

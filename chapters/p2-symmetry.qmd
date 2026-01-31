@@ -234,6 +234,18 @@ def transformer_with_position(X, positions):
 
 This is a design choice: Transformers start permutation-equivariant and add position information.
 
+::: {.callout-note}
+## Rotation Symmetry in Positional Encoding
+
+**Rotary Position Embeddings (RoPE)** exploit a different symmetry to encode position. RoPE applies 2D rotations to pairs of embedding dimensions, leveraging the SO(2) rotation group's special property:
+
+$$R_m^T R_n = R_{n-m}$$
+
+When computing attention $(R_m q)^T (R_n k) = q^T R_{n-m} k$, only the *relative* position remains—exactly what attention needs.
+
+This is symmetry exploitation in a sophisticated form: the rotation group's algebraic structure encodes relative position naturally. See [Chapter: Long-Context Attention](25-long-context.qmd) for the full derivation.
+:::
+
 ## Symmetry in Optimization
 
 Some optimizations exploit symmetry of the parameter space.

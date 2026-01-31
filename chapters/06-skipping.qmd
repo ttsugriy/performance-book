@@ -422,6 +422,239 @@ For many applications, FlashAttention + dense attention beats sparse attention:
 
 Sparse attention shines for very long sequences (>16K tokens) where even FlashAttention's O(n²) compute is prohibitive.
 
+## From Sparsity to Structure
+
+Here's a counterintuitive insight: sometimes the best alternative to a sparse matrix isn't a denser sparse matrix—it's a *structured dense matrix*.
+
+### The Core Insight
+
+Random sparsity fails because hardware can't predict the pattern. But what if we replace a large matrix with a *smaller* structured computation that achieves similar expressiveness?
+
+```
+Approach 1: Sparse matrix
+  - 1000×1000 matrix, 90% zeros
+  - 100K non-zeros + indices
+  - Random access pattern → slow
+
+Approach 2: Structured matrix
+  - Two 1000×32 matrices (UV^T, rank-32)
+  - 64K values, no indices
+  - Sequential access pattern → fast
+  - Often more expressive than random sparsity!
+```
+
+The key: **structure enables algorithmic speedups, not just zero-skipping**.
+
+### Structured Matrix Families
+
+Several matrix families have structure that enables efficient multiplication:
+
+#### Low-Rank Matrices (Separability)
+
+Any matrix can be approximated as $A \approx UV^T$ where $U$ and $V$ are thin matrices.
+
+```python
+def low_rank_multiply(U, V, x):
+    """
+    Compute (UV^T)x efficiently.
+
+    A is n×n, but stored as U (n×r) and V (n×r)
+    """
+    # Instead of: A @ x  →  O(n²)
+    # Do: U @ (V.T @ x)  →  O(nr)
+    return U @ (V.T @ x)
+```
+
+This is the **separability** property (see [Chapter: Separability](05-factoring.qmd)). LoRA exploits exactly this for efficient fine-tuning.
+
+When does low-rank work? When the matrix has *structure*—correlations between rows or columns. Neural network weight matrices often have low effective rank after training.
+
+#### Butterfly Matrices
+
+Butterfly matrices factor a matrix into $O(\log n)$ sparse structured layers:
+
+```
+n×n butterfly matrix = Product of log(n) sparse factors
+
+Each factor:
+  - Block-diagonal structure
+  - 2×2 blocks mixed with permutations
+  - Only O(n) non-zeros per factor
+
+Total: O(n log n) multiply instead of O(n²)
+```
+
+```python
+def butterfly_multiply(factors, x):
+    """
+    Multiply by a butterfly-factored matrix.
+
+    factors: list of log(n) sparse block-diagonal matrices
+    """
+    result = x
+    for factor in factors:
+        # Each factor is block-diagonal with 2×2 blocks
+        # O(n) operations per factor
+        result = factor @ result
+    return result
+    # Total: O(n log n)
+```
+
+The FFT is a butterfly matrix! Butterfly structure appears naturally in:
+- Signal processing (FFT, DCT)
+- Efficient linear layers (Monarch matrices)
+- Replacing attention heads (Hyena, M2-BERT)
+
+#### Monarch Matrices
+
+Monarch matrices use a clever factorization:
+
+$$M = P_2 \cdot (L_1 \odot L_2) \cdot P_1$$
+
+where $L_1, L_2$ are block-diagonal and $P_1, P_2$ are permutations.
+
+```
+Monarch matrix structure:
+  1. Permute input (P₁)
+  2. Block-diagonal multiply (parallel small matrices)
+  3. Element-wise multiply (L₁ ⊙ L₂)
+  4. Permute output (P₂)
+
+Complexity: O(n√n) vs O(n²) for dense
+Hardware: Block-diagonal = batched small GEMMs = fast
+```
+
+Monarch matrices achieve:
+- 2× speedup over dense for language model FFN layers
+- Minimal quality loss (<1% perplexity)
+- Hardware-friendly operations (block GEMMs, no irregular access)
+
+#### Circulant and Toeplitz Matrices
+
+Matrices with shift structure can use FFT:
+
+```python
+def circulant_multiply(first_column, x):
+    """
+    Multiply by circulant matrix using FFT.
+
+    Circulant: each row is previous row shifted by 1
+    """
+    # Circulant = F^{-1} diag(F c) F
+    # where F is the DFT matrix, c is first column
+
+    c_fft = torch.fft.fft(first_column)
+    x_fft = torch.fft.fft(x)
+    result_fft = c_fft * x_fft
+    return torch.fft.ifft(result_fft).real
+    # O(n log n) instead of O(n²)
+```
+
+Circulant structure appears in convolutions (which is why FFT-based convolution works).
+
+### When Structure Beats Sparsity
+
+Here's a practical comparison:
+
+| Matrix Type | Size | Storage | Multiply Cost | Hardware Efficiency |
+|------------|------|---------|---------------|---------------------|
+| Dense | n×n | n² | O(n²) | 100% (baseline) |
+| Random 90% sparse | n×n | ~0.2n² | O(0.1n²) theory | 20-30% of theoretical |
+| Block sparse (50%) | n×n | 0.5n² | O(0.5n²) | 70-80% of theoretical |
+| 2:4 structured | n×n | 0.5n² | O(0.5n²) | 100% (hardware support) |
+| Low-rank (r=32) | n×n | 64n | O(64n) | 100% (dense GEMMs) |
+| Butterfly | n×n | O(n log n) | O(n log n) | ~80% (structured sparse) |
+| Monarch | n×n | O(n√n) | O(n√n) | ~90% (block GEMMs) |
+
+**The pattern**: Structured matrices achieve their theoretical speedup because hardware can predict and optimize the access pattern.
+
+### Structured FFN Layers
+
+Feed-forward layers are 2/3 of transformer parameters. Structured replacements are compelling:
+
+```python
+class MonarchFFN(nn.Module):
+    """
+    FFN layer using Monarch matrix factorization.
+
+    Standard FFN: 4n² parameters
+    Monarch FFN:  O(n√n) parameters, similar expressiveness
+    """
+    def __init__(self, dim, block_size=32):
+        super().__init__()
+        n_blocks = dim // block_size
+
+        # Block-diagonal matrices
+        self.blocks_up = nn.Parameter(
+            torch.randn(n_blocks, block_size, block_size * 4)
+        )
+        self.blocks_down = nn.Parameter(
+            torch.randn(n_blocks, block_size * 4, block_size)
+        )
+
+        # Permutations (can be learned or fixed)
+        self.register_buffer('perm',
+            torch.randperm(dim).reshape(n_blocks, block_size))
+
+    def forward(self, x):
+        batch, seq, dim = x.shape
+        n_blocks = self.blocks_up.shape[0]
+        block_size = dim // n_blocks
+
+        # Reshape for block operations
+        x = x.view(batch, seq, n_blocks, block_size)
+
+        # Apply permutation + block diagonal up-projection
+        x = x[:, :, self.perm // block_size, self.perm % block_size]
+        x = torch.einsum('bsnb,nbo->bsno', x, self.blocks_up)
+
+        # Activation
+        x = F.gelu(x)
+
+        # Block diagonal down-projection + inverse permutation
+        x = torch.einsum('bsno,nob->bsnb', x, self.blocks_down)
+
+        return x.view(batch, seq, dim)
+```
+
+### The Separability Connection
+
+Structured matrices are deeply connected to **separability** (Chapter 5):
+
+| Technique | Factorization | Separability Pattern |
+|-----------|---------------|---------------------|
+| Low-rank | $A = UV^T$ | Separates rows from columns |
+| Butterfly | $A = B_1 B_2 \cdots B_k$ | Separates scales (like FFT) |
+| Monarch | $A = P_2 (L_1 \odot L_2) P_1$ | Separates blocks + permutation |
+| Tensor decomposition | $A = \sum_r a_r \otimes b_r$ | Separates dimensions |
+
+The meta-lesson: **when sparse doesn't work, look for separable structure**.
+
+### When to Use Each Approach
+
+```
+Problem                          Best Approach
+────────────────────────────────────────────────────
+Natural sparsity (pruned nets)   2:4 structured sparsity
+Conditional compute              MoE (dynamic sparsity)
+Compressing large weights        Low-rank (LoRA, SVD)
+Replacing dense layers           Monarch or butterfly
+Convolution-like operations      Circulant (FFT)
+Long-range dependencies          Structured attention (not sparse)
+```
+
+::: {.callout-note}
+## The Deep Insight
+
+Sparsity is about *skipping zeros*. Structure is about *exploiting patterns*.
+
+Random zeros give no pattern to exploit. Structured matrices—even fully dense ones—give patterns that enable algorithmic shortcuts.
+
+This is why 2:4 sparsity works (hardware knows the pattern) and why Monarch matrices can be faster than 90% sparse matrices (predictable block structure beats unpredictable random access).
+
+The question isn't "how many zeros?" but "what structure enables efficient algorithms?"
+:::
+
 ## The Sparsity-Hardware Co-Design
 
 The lesson from sparsity: **algorithms and hardware must be designed together**.
@@ -445,7 +678,9 @@ The pattern: **constrain flexibility for predictability**.
 
 4. **Attention is empirically sparse**: But exploiting it is hard. Dense FlashAttention often beats sparse approximations.
 
-5. **Co-design is essential**: The best sparsity pattern depends on your hardware. NVIDIA 2:4 only matters on Ampere+.
+5. **Structured matrices beat random sparsity**: Butterfly, Monarch, and low-rank matrices achieve theoretical speedups because their patterns are predictable. The question isn't "how many zeros?" but "what structure enables efficient algorithms?"
+
+6. **Co-design is essential**: The best sparsity pattern depends on your hardware. NVIDIA 2:4 only matters on Ampere+.
 
 ## The Meta-Lesson
 
@@ -478,4 +713,7 @@ The accompanying notebook lets you:
 - Fedus et al. (2021). "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity"
 - Mishra et al. (2021). "Accelerating Sparse Deep Neural Networks" (NVIDIA 2:4 sparsity)
 - Beltagy et al. (2020). "Longformer: The Long-Document Transformer"
+- Dao et al. (2022). "Monarch: Expressive Structured Matrices for Efficient and Accurate Training"
+- Dao et al. (2019). "Learning Fast Algorithms for Linear Transforms Using Butterfly Factorizations"
+- Fu et al. (2023). "Hungry Hungry Hippos: Towards Language Modeling with State Space Models"
 
