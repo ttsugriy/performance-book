@@ -580,9 +580,9 @@ How would you discover LoRA if it didn't exist?
 
 **Chapter 5 (Factoring)**: LoRA is matrix factorization applied to weight updates. The same mathematical machinery as SVD and MobileNets.
 
-**Chapter 13 (Quantization)**: QLoRA combines the insights of low-rank structure and reduced precision.
+**Chapter 12 (Quantization)**: QLoRA combines the insights of low-rank structure and reduced precision.
 
-**Chapter 4 (Chunking)**: LoRA training can be parallelized—adapters for different layers are independent.
+**Chapter 4 (Associativity)**: LoRA training can be parallelized—adapters for different layers are independent.
 
 ::: {.callout-note}
 ## Try It Yourself

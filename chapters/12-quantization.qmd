@@ -871,7 +871,7 @@ flowchart LR
 
 **Chapter 5 (Factoring)**: Quantization and low-rank share a theme—the model doesn't need all its precision
 
-**Chapter 12 (LoRA)**: QLoRA combines quantization with LoRA for efficient fine-tuning
+**Chapter 11 (LoRA)**: QLoRA combines quantization with LoRA for efficient fine-tuning
 
 **Chapter 2 (Bandwidth)**: Quantization's benefit is often memory bandwidth, not compute
 

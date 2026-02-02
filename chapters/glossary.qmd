@@ -89,6 +89,9 @@ This glossary defines key terms used throughout the book. Terms are organized al
 **Redundancy**
 : A property where the information content of data is less than its representation size. Enables quantization, compression, caching, and approximation. Shannon's entropy measures true information content.
 
+**Reversibility**
+: A property where intermediate states can be reconstructed from outputs (or compact summaries), enabling memory savings via recomputation. Common in reversible networks and checkpointing schemes.
+
 **Separability**
 : A property where a function can be decomposed into simpler, independent components. Enables factorization optimizations like separable filters and low-rank approximations.
 
@@ -132,10 +135,11 @@ This glossary defines key terms used throughout the book. Terms are organized al
 | Bandwidth and roofline | Bandwidth |
 | Parallelism | Parallelism |
 | GPU architecture | GPU Architecture |
-| Associativity and chunking | Associativity |
-| Separability and factoring | Separability |
-| Locality and tiling | Locality |
-| Sparsity and skipping | Sparsity |
+| Associativity | Associativity |
+| Separability | Separability |
+| Locality | Locality |
+| Sparsity | Sparsity |
+| Reversibility | Reversibility |
 | Redundancy | Redundancy |
 | Symmetry | Symmetry |
 | FlashAttention | FlashAttention |
