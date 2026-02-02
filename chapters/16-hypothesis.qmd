@@ -37,7 +37,7 @@ Is your code slow because of:
   □ Synchronization (lock-bound)
 ```
 
-These are mutually exclusive. Optimizing CPU computation when you're memory-bound is waste.
+These are common primary bottlenecks, but more than one can apply. Optimizing CPU computation when you're memory-bound is waste.
 
 ### 2. Where Is the Time Going?
 

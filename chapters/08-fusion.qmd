@@ -10,6 +10,8 @@ Every memory round-trip has a cost. If you write to memory just to read it back,
 Fusion eliminates these round-trips by combining operations into a single pass.
 :::
 
+Fusion is primarily a compiler/runtime optimization; later tooling chapters show how modern stacks implement it.
+
 ## The Hidden Cost of Abstraction
 
 Modern deep learning frameworks provide beautiful abstractions:
@@ -32,7 +34,7 @@ Kernel 2 (relu):    Read from HBM → max(0, x) → Write to HBM
 Kernel 3 (dropout): Read from HBM → mask → Write to HBM
 ```
 
-Three round-trips to HBM. For an H100 at 3 TB/s bandwidth and 80GB HBM, each round-trip costs microseconds. These add up.
+Three round-trips to HBM. The cost is bytes ÷ bandwidth: moving a 1 GB tensor at 3 TB/s is ~0.33 ms per pass. These add up.
 
 The computation is trivial—multiply, compare, mask. The memory traffic is expensive.
 

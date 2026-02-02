@@ -460,7 +460,7 @@ for n_layers in range(1, 11):
     print(f"Layers {n_layers}: error = {error:.2e}")
 ```
 
-Error grows roughly linearly with depth for float32 (~1e-7 per layer), but can grow super-linearly for float16 due to catastrophic cancellation in subtraction.
+In this example, error grows roughly linearly with depth for float32 (~1e-7 per layer), but can grow super-linearly for float16 due to catastrophic cancellation in subtraction.
 
 ---
 

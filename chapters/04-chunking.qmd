@@ -506,11 +506,11 @@ Not everything associates. Recognize these cases:
 
 ```python
 # Counterexample:
-chunk1 = [1, 2, 3]    # median = 2
-chunk2 = [4, 5, 6]    # median = 5
-combined = [1, 2, 3, 4, 5, 6]  # median = 3.5
+chunk1 = [1, 2, 100]   # median = 2
+chunk2 = [3, 4, 5]     # median = 4
+combined = [1, 2, 3, 4, 5, 100]  # median = 3.5
 
-# median(2, 5) = 3.5? No, we got lucky. Usually it's wrong.
+# median(2, 4) = 3, which is not the global median (3.5).
 ```
 
 **Mode**: The mode of modes is not the global mode.

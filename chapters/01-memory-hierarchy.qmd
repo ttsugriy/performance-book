@@ -189,7 +189,7 @@ html`
 
 The memory hierarchy isn't an accident. It's a response to a fundamental physical constraint: **the speed of light**.
 
-In one nanosecond, light travels about 30 centimeters. Electricity in copper moves slower—roughly 20 cm/ns. A round-trip to DRAM requires physical distance that simply cannot be covered in the time a fast operation completes.
+In one nanosecond, light travels about 30 centimeters. Electricity in copper moves slower—roughly 20 cm/ns. Propagation delay is only one contributor, though: DRAM latency is dominated by device timing, refresh, and queueing. The physical distance still makes it impossible for a "fast" compute cycle to wait on far memory.
 
 Additionally, there's a fundamental tradeoff between **speed** and **capacity**:
 

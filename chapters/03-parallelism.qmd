@@ -139,7 +139,7 @@ Speedup
               Threads
 ```
 
-On a typical server, memory bandwidth saturates around 4-8 threads for memory-bound workloads. The other 56 cores? Waiting.
+On many servers, memory bandwidth saturates within a single socket (often ~4–16 threads for memory-bound workloads, depending on platform and NUMA). The other cores? Waiting.
 
 ## Investigation: Where Does Parallelism Actually Help?
 

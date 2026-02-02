@@ -529,7 +529,7 @@ Weight reuse scales with batch size. This is why training uses large batches.
 
 ## The Locality Principle
 
-All four properties we've studied—associativity, separability, sparsity, and locality—are strategies for the same goal:
+The first four properties we've studied so far—associativity, separability, sparsity, and locality—are strategies for the same goal:
 
 **Keep the data you need close to where you compute.**
 

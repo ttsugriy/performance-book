@@ -355,11 +355,11 @@ Used for: Distributing gradients in ZeRO/FSDP
 Communication speed depends on *which* GPUs are communicating:
 
 **NVLink** (within a node):
-- 8× A100: 600 GB/s bidirectional per GPU
+- 8× A100 (NVLink 3): ~600 GB/s bidirectional per GPU (aggregate across links)
 - Very fast, all-to-all connectivity
 
 **InfiniBand** (across nodes):
-- 200-800 Gb/s per node (25-100 GB/s)
+- 200-800 Gb/s aggregate per node depending on NIC count (25-100 GB/s)
 - Higher latency than NVLink
 
 **Strategy**: Minimize cross-node communication
