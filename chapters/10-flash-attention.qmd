@@ -751,7 +751,7 @@ This is the investigation pattern. Not "here's FlashAttention" but "how would yo
 
 ## FlashAttention-3: Hopper-Specific Optimizations
 
-FlashAttention-2 was architecture-agnostic. FlashAttention-3 exploits Hopper's unique features for another 1.5-2× speedup.
+FlashAttention-2 was architecture-agnostic. FlashAttention-3 exploits Hopper's unique features and can deliver up to ~1.5-2× speedup on H100-sized workloads (shape- and kernel-dependent).
 
 ### The Three Innovations
 
@@ -888,7 +888,7 @@ Memory operations and compute never contend for the same buffer.
 
 ### FP8 Attention
 
-Hopper's tensor cores support FP8 for 2× the FLOPS of FP16.
+Hopper's tensor cores offer roughly 2× the FP8 peak of FP16 for dense math, depending on kernel shape and sparsity mode.
 
 **The challenge:** FP8 has limited range (±448 for E4M3).
 
@@ -917,7 +917,7 @@ def fp8_attention(Q, K, V):
     return P @ V
 ```
 
-**Accuracy:** Within 0.1% of FP16 attention with proper scaling.
+**Accuracy:** Typically close to FP16 when scaling is tuned, but varies by model and data distribution.
 
 ### Performance Comparison
 
@@ -933,6 +933,8 @@ FA3 FP8     1.9         1,180    60% (FP8)   FP8 tensor cores
 
 Theoretical peak: 989 TFLOPS (FP16), 1979 TFLOPS (FP8)
 ```
+
+These numbers are from a single benchmark configuration (H100, seq 8192, head dim 128). Actual results vary with sequence length, head dimension, and kernel tuning.
 
 ### When to Use Each Version
 

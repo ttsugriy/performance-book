@@ -422,7 +422,7 @@ def matmul_kernel(
     tl.store(C_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn, acc)
 ```
 
-**Performance:** 80-90% of cuBLAS on A100!
+**Performance:** In this example, tuned Triton can reach ~80-90% of cuBLAS on A100; results vary by shape and layout.
 
 ## Optimization Techniques
 
