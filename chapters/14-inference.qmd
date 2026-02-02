@@ -147,7 +147,7 @@ For 32 heads: **32× smaller KV cache**
 
 On A100 (80GB): KV cache capacity scales accordingly, but overall concurrency is still limited by weights and other overheads (so expect far fewer than 500 sequences in practice).
 
-**Tradeoff**: Slight quality degradation (2-3% worse perplexity). Worthwhile for inference.
+**Tradeoff**: Slight quality degradation; reported perplexity impact is model- and data-dependent (often a few percent). Worthwhile for inference.
 
 **Grouped-Query Attention (GQA)**: Middle ground—share K/V across groups of heads (e.g., 4-8 heads per group). Used in LLaMA-2.
 
