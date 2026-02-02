@@ -53,6 +53,9 @@ This glossary defines key terms used throughout the book. Terms are organized al
 **Latency**
 : Time to complete a single operation or request. Contrast with throughput (operations per second).
 
+**Little's Law**
+: A queueing identity: $L = \lambda W$, relating average in-system requests $L$, arrival rate $\lambda$, and average time in system $W$.
+
 **Locality**
 : A property where a function's output depends primarily on nearby inputs. Enables tiling, blocking, and cache-efficient algorithms. Temporal locality (reuse over time) and spatial locality (adjacent access) are the two main forms.
 
@@ -82,6 +85,9 @@ This glossary defines key terms used throughout the book. Terms are organized al
 
 **Quantization**
 : Representing numbers with fewer bits (e.g., FP16 instead of FP32, or INT8 instead of FP16). Reduces memory footprint and bandwidth, sometimes with specialized hardware support.
+
+**Queueing**
+: The study of waiting lines. Provides models for how arrival rates, service times, and variability determine latency and tail behavior in serving systems.
 
 **Roofline Model**
 : A visual model showing maximum achievable performance as a function of arithmetic intensity. Performance is bounded by min(peak FLOPS, bandwidth × intensity).
@@ -119,6 +125,9 @@ This glossary defines key terms used throughout the book. Terms are organized al
 **Throughput**
 : The number of operations completed per unit time. Contrast with latency (time per operation).
 
+**Utilization**
+: The fraction of time a server is busy, $\rho = \lambda / \mu$. As utilization approaches 1, queueing delay grows rapidly.
+
 **Working Set**
 : The set of data actively being accessed. Performance depends on whether the working set fits in each cache level.
 
@@ -145,6 +154,7 @@ This glossary defines key terms used throughout the book. Terms are organized al
 | FlashAttention | FlashAttention |
 | LoRA | LoRA |
 | Quantization | Quantization |
+| Queueing theory | Queueing Theory for Serving |
 | Measurement | The Art of Measurement |
 | Benchmarking best practices | The Art of Measurement |
 :::

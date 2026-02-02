@@ -47,6 +47,7 @@ book:
         - chapters/24-mixture-of-experts.qmd
         - chapters/25-long-context.qmd
         - chapters/26-gpu-memory.qmd
+        - chapters/27a-queueing-theory.qmd
         - chapters/27-advanced-serving.qmd
     - part: "Part V: Methodology"
       chapters:
