@@ -1,5 +1,8 @@
 # Book Transformation Summary: "The Algebra of Speed"
 
+> Note: This document is a historical snapshot from an earlier draft (pre-2026).
+> The current structure and chapter list live in `_quarto.yml`.
+
 ## What's Been Accomplished
 
 ### ✅ Phase 1: Foundation & Restructuring (COMPLETE)

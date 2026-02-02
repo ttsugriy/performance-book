@@ -28,9 +28,9 @@ book:
       chapters:
         - chapters/04-chunking.qmd
         - chapters/05-factoring.qmd
-        - chapters/07-locality.qmd
         - chapters/06-skipping.qmd
         - chapters/06-reversibility.qmd
+        - chapters/07-locality.qmd
         - chapters/p2-redundancy.qmd
         - chapters/p2-symmetry.qmd
     - part: "Part III: Algorithm Investigations"

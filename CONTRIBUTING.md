@@ -1,4 +1,4 @@
-# Contributing to The Nature of Fast
+# Contributing to The Algebra of Speed
 
 Thank you for your interest in contributing! This book aims to be the definitive resource for understanding computational performance, and community contributions make it better.
 
@@ -62,8 +62,8 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Install Node.js dependencies (for interactives)
-npm install
+# Node.js dependencies (optional)
+# This repo does not include a package.json; skip unless you add JS tooling.
 ```
 
 ### Local Preview
@@ -74,15 +74,18 @@ quarto preview
 
 This starts a local server with hot-reload.
 
-### Running Tests
+### Running Checks
 
 ```bash
-# Test that notebooks run
-python -m pytest tests/
-
-# Validate links
+# Validate links and Quarto setup
 quarto check
+
+# Optional: render to ensure the site builds locally
+quarto render
 ```
+
+> Note: PDF output is currently disabled because OJS blocks cause rendering to hang.
+> See `_quarto.yml` for details and the suggested workaround.
 
 ## Style Guide
 

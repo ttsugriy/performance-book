@@ -1,5 +1,8 @@
 # Advanced Topics Research: Making "The Algebra of Speed" Best-in-Class
 
+> Note: This document is a research backlog. Some topics below are now partially covered
+> (e.g., GPU architecture in Chapter 04, compiler/tooling in Chapters 20–21).
+
 ## Current State Assessment
 
 **Strengths:**
@@ -14,7 +17,7 @@
 ### CRITICAL MISSING TOPICS
 
 #### 1. GPU Programming Deep Dive
-Current book mentions GPUs but doesn't teach GPU programming fundamentals.
+Current book covers GPU architecture and Triton examples but does not teach CUDA programming fundamentals.
 
 **What's Missing:**
 - CUDA execution model (grids, blocks, warps, threads)

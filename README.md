@@ -74,44 +74,24 @@ quarto render
 
 ## 📚 Book Structure
 
-**18 chapters organized into 4 parts:**
+The source of truth for the ToC is `_quarto.yml`. At a high level, the book is organized as:
 
-**Part I: The Hardware Reality** (Chapters 1-3)
-- Memory Hierarchy
-- Thinking in Bandwidth
-- When Parallelism Pays
-- *Interlude: A Measurement Mindset*
-
-**Part II: The Algebra of Efficiency** (Chapters 4-8)
-- Chunking (Associativity)
-- Factoring (Separability)
-- Skipping (Sparsity)
-- Locality (Tiling)
-- Fusion (Operator Combination)
-
-**Part III: The Investigations** (Chapters 9-14)
-- Matrix Multiply Investigation
-- FlashAttention Derivation
-- LoRA and Low-Rank Adaptation
-- Quantization Deep Dive
-- Distributed Training
-- Inference Optimization
-
-**Part IV: The Method** (Chapters 15-18)
-- The Art of Measurement
-- The Art of Hypothesis
-- The Art of Analogy
-- When Not to Optimize
-
-**Appendices**
-- Glossary of Key Terms
+- **Foundation**: Thinking in Arrays, Algebraic Framework, Measurement interlude
+- **Part I: The Hardware Reality**
+- **Part II: The Six Properties**
+- **Part III: Algorithm Investigations**
+- **Part IV: Systems Investigations**
+- **Part V: Methodology**
+- **Part VI: Tools**
+- **Part VII: Synthesis**
+- **Appendices**
 
 ## 🤝 Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Ways to help:
-- **Report issues**: Found an error? [Open an issue](https://github.com/nicktobey/performance-book/issues)
+- **Report issues**: Found an error? [Open an issue](https://github.com/ttsugriy/performance-book/issues)
 - **Improve explanations**: Clarity is everything
 - **Add visualizations**: Interactive > static
 - **Fix typos**: Every little bit helps

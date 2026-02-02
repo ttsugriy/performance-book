@@ -96,7 +96,7 @@ Most performance resources cover one pillar. This book weaves all three together
 
 The book is designed for multiple reading patterns:
 
-**Linear reading**: Parts build on each other. The Algebraic Framework establishes the theory. Part I covers hardware. Part II introduces properties. Parts III-IV apply them to algorithms and systems. Part V provides practical tools.
+**Linear reading**: Parts build on each other. The Algebraic Framework establishes the theory. Part I covers hardware. Part II introduces properties. Parts III-IV apply them to algorithms and systems. Part V covers methodology, Part VI provides practical tools, and Part VII synthesizes.
 
 **Investigation hopping**: Each investigation in Parts III-IV is somewhat self-contained. If you're curious about FlashAttention specifically, you can start there—with occasional references back to earlier material.
 
