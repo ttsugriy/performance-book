@@ -60,6 +60,41 @@ If your average service time is 50 ms, then 90% utilization implies ~500 ms mean
 
 **Takeaway**: High utilization is the enemy of tail latency.
 
+:::: {.callout-note}
+## Interactive: Utilization vs Latency
+
+Move utilization toward 1 and watch latency explode.
+
+```{ojs}
+//| echo: false
+viewof utilization = Inputs.range([0.05, 0.98], {
+  value: 0.8,
+  step: 0.01,
+  label: "Utilization (ρ)"
+})
+
+viewof meanServiceMs = Inputs.range([5, 200], {
+  value: 50,
+  step: 5,
+  label: "Mean service time (ms)"
+})
+
+meanServiceSec = meanServiceMs / 1000
+expectedW = meanServiceSec / (1 - utilization)
+queueDelay = expectedW - meanServiceSec
+slowdown = expectedW / meanServiceSec
+
+html`
+<div style="font-family: monospace; padding: 1rem; background: #f5f5f5; border-radius: 8px;">
+  <div><strong>Mean service time:</strong> ${meanServiceMs.toFixed(0)} ms</div>
+  <div><strong>Expected mean latency (W):</strong> ${(expectedW * 1000).toFixed(1)} ms</div>
+  <div><strong>Queueing delay (Wq):</strong> ${(queueDelay * 1000).toFixed(1)} ms</div>
+  <div><strong>Slowdown (W / E[S]):</strong> ${slowdown.toFixed(1)}×</div>
+</div>
+`
+```
+::::
+
 ## Variability Drives Tails
 
 Two systems can have the same average service time but wildly different tails.
@@ -81,6 +116,51 @@ $$W_q \approx \frac{\rho}{1-\rho} \cdot \frac{c_a^2 + c_s^2}{2} \cdot E[S]$$
 Where $c_a$ and $c_s$ are the coefficients of variation of inter-arrival and service times.
 
 **Translation**: Variability is multiplicative with utilization. Reduce variance, reduce tail latency.
+
+:::: {.callout-note}
+## Interactive: Variability Penalty (Kingman)
+
+Explore how arrival/service variability amplifies queueing delay.
+
+```{ojs}
+//| echo: false
+viewof utilK = Inputs.range([0.05, 0.98], {
+  value: 0.8,
+  step: 0.01,
+  label: "Utilization (ρ)"
+})
+
+viewof meanServiceMsK = Inputs.range([5, 200], {
+  value: 50,
+  step: 5,
+  label: "Mean service time E[S] (ms)"
+})
+
+viewof ca = Inputs.range([0.1, 3], {
+  value: 1,
+  step: 0.1,
+  label: "Arrival variability (c_a)"
+})
+
+viewof cs = Inputs.range([0.1, 3], {
+  value: 1,
+  step: 0.1,
+  label: "Service variability (c_s)"
+})
+
+meanServiceSecK = meanServiceMsK / 1000
+kingmanWq = (utilK / (1 - utilK)) * ((ca ** 2 + cs ** 2) / 2) * meanServiceSecK
+kingmanW = kingmanWq + meanServiceSecK
+
+html`
+<div style="font-family: monospace; padding: 1rem; background: #f5f5f5; border-radius: 8px;">
+  <div><strong>Queueing delay (Wq):</strong> ${(kingmanWq * 1000).toFixed(1)} ms</div>
+  <div><strong>Total mean latency (W):</strong> ${(kingmanW * 1000).toFixed(1)} ms</div>
+  <div><strong>Variability factor:</strong> ${(((ca ** 2 + cs ** 2) / 2)).toFixed(2)}</div>
+</div>
+`
+```
+::::
 
 ## Two-Phase Service: Prefill + Decode
 
