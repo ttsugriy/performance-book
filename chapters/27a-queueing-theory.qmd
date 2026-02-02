@@ -177,7 +177,7 @@ then variance comes from output length. Long generations create heavy tails even
 
 - Separate queues for prefill and decode
 - Predict or cap output length
-- Prioritize short requests (SRPT-like scheduling)
+- Prioritize short requests (Shortest Remaining Processing Time, SRPT)
 
 ## Batching: The Throughput Tradeoff
 
