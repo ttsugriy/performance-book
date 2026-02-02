@@ -22,9 +22,11 @@ NVIDIA A100 Peak Performance by Precision:
 │ TF32: 156 TFLOPS                        │
 │ FP16: 312 TFLOPS                        │
 │ INT8: 624 TOPS                          │
-│ FP8:  ~1000 TFLOPS (estimated)          │
+│ FP8:  Not supported on A100             │
 └─────────────────────────────────────────┘
 ```
+
+FP8 support begins with Hopper-class GPUs (H100) and AMD's MI300; Ampere-class A100 does not include FP8 tensor cores.
 
 A 32× speedup from FP64 to FP16. A 100× speedup to INT8. But you can't just switch precisions blindly—the math breaks in specific, predictable ways.
 

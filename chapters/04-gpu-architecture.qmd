@@ -17,13 +17,13 @@ This fundamental difference shapes everything about GPU programming—and everyt
 An NVIDIA A100 GPU delivers:
 - 19.5 TFLOPS (FP32)
 - 312 TFLOPS (FP16 with tensor cores)
-- 1,555 GB/s memory bandwidth
+- 1,600-2,000 GB/s memory bandwidth (A100 SXM 40-80GB; PCIe lower)
 
 A modern CPU (Intel Xeon Platinum) delivers:
 - ~2 TFLOPS (FP32)
 - ~200 GB/s memory bandwidth
 
-**The GPU is 100-150× faster for dense linear algebra.**
+**The GPU can be up to ~100× faster for dense linear algebra (depending on dtype, shape, and batch size).**
 
 But this performance comes with constraints. Understanding GPU architecture is essential for writing fast code.
 
@@ -120,7 +120,7 @@ GPUs have a complex memory hierarchy, much steeper than CPUs:
 │  - Shared across all SMs                │  40 MB (A100)
 │  - Automatically managed                │
 ├─────────────────────────────────────────┤
-│  HBM (High Bandwidth Memory)            │  1,555 GB/s (A100)
+│  HBM (High Bandwidth Memory)            │  1,600-2,000 GB/s (A100 SXM)
 │  - Main GPU memory                      │  40-80 GB
 │  - Latency: ~400 cycles                 │
 └─────────────────────────────────────────┘
@@ -251,7 +251,7 @@ Unlike shared memory, L1 and L2 are **automatically managed**. You don't control
 
 HBM is the main GPU memory (40-80 GB). It's:
 - Large
-- Relatively slow (1,555 GB/s on A100)
+- Relatively slow (1,600-2,000 GB/s on A100 SXM; PCIe lower)
 - High latency (~400 cycles)
 
 **The cardinal rule:** Minimize HBM traffic.

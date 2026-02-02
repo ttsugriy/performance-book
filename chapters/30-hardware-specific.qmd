@@ -18,16 +18,17 @@ The accelerator market is more diverse than ever:
 
 ```
 Major ML Accelerators (2024-2025):
+Approximate peak specs as of 2024-2025 public announcements; SKUs and configurations vary.
 
 NVIDIA:
-  - B200/B100 (Blackwell): 192GB HBM3e, 8 TB/s, FP4 support
+  - B200/B100 (Blackwell): 192GB HBM3e, ~8 TB/s, FP4 support
   - H100/H200 (Hopper): 80-141GB HBM3, 3.35-4.8 TB/s, FP8 support
-  - A100 (Ampere): 40/80GB HBM2e, 2 TB/s
+  - A100 (Ampere): 40/80GB HBM2e, 1.6-2.0 TB/s (SXM; PCIe lower)
   - L4/L40S: Inference-focused, lower power
 
 AMD:
   - MI300X: 192GB HBM3, 5.3 TB/s
-  - MI325X: 256GB HBM3e, 6 TB/s (2025)
+  - MI325X: 256GB HBM3e, 6 TB/s (2025, announced)
 
 Intel:
   - Gaudi 2/3: HBM-based accelerators
@@ -38,7 +39,7 @@ Apple:
 
 Google:
   - TPU v5e/v5p: Custom ASICs, XLA-optimized
-  - TPU v6: Trillium, 4× v5p performance
+  - TPU v6: Trillium, ~4× v5p performance (announced)
 ```
 
 ## NVIDIA: A100 vs H100
@@ -46,13 +47,13 @@ Google:
 ### Architectural Differences
 
 ```
-                        A100            H100
+                        A100                     H100
 ─────────────────────────────────────────────────
 SM Count                108             132
 FP16 TFLOPS             312             989
 FP8 TFLOPS              N/A             1,979
 Memory                  80GB HBM2e      80GB HBM3
-Bandwidth               2.0 TB/s        3.35 TB/s
+Bandwidth               1.6-2.0 TB/s    3.35 TB/s
 NVLink                  600 GB/s        900 GB/s
 
 Key H100 additions:
@@ -61,6 +62,8 @@ Key H100 additions:
 - Thread Block Clusters
 - Asynchronous execution barriers
 ```
+
+Note: Values are dense peak specs and vary by SKU (SXM vs PCIe) and clock rates. Use vendor datasheets for exact numbers.
 
 ### H100-Specific Optimizations
 
@@ -148,7 +151,7 @@ def get_optimal_config():
 
 ## NVIDIA Blackwell: B100 and B200
 
-### The Next Generation (2024-2025)
+### The Next Generation (2024-2025, announced/roadmap)
 
 Blackwell represents another generational leap from Hopper:
 
@@ -176,8 +179,8 @@ Key Blackwell additions:
 Blackwell introduces native FP4 (4-bit floating point):
 
 ```python
-# FP4 has very limited range: ~±6 with 2 mantissa bits
-# Requires careful scaling
+# FP4 range/precision depend on the exact format (e.g., E2M1 vs E3M0)
+# Very limited dynamic range; requires careful scaling
 
 def fp4_linear(x, weight, scale_x, scale_w):
     """FP4 matrix multiply with per-tensor scaling."""

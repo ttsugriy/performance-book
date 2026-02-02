@@ -602,7 +602,7 @@ Tensor Core operation:
 
   One Tensor Core: 256 FLOPs per cycle
   A100 has 432 Tensor Cores
-  Peak: 312 TFLOPS (FP16) or 156 TFLOPS (TF32)
+  Peak (theoretical, A100 SXM): 312 TFLOPS (FP16) or 156 TFLOPS (TF32)
 ```
 
 Tensor Cores are purpose-built for matrix multiply. They achieve 10-20× higher throughput than CUDA cores.

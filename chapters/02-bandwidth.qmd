@@ -7,7 +7,7 @@ id: sec-bandwidth
 ---
 
 ::: {.chapter-opener}
-An H100 GPU can perform 2,000 trillion operations per second. It can move 3 trillion bytes per second from memory. That's 667 operations per byte. If your algorithm does fewer than ~100 operations per byte, you're not computing—you're waiting.
+An H100 GPU can perform about 1,000 trillion operations per second for dense FP16. It can move about 3.35 trillion bytes per second from memory. That's roughly 300 operations per byte. FP8 peaks are higher, which raises the ridge point. If your algorithm does far fewer than ~300 operations per byte, you're not computing—you're waiting.
 
 Understanding this ratio is the key to understanding modern performance.
 :::
@@ -30,11 +30,11 @@ Let's look at an NVIDIA H100 GPU:
 
 | Resource | Capacity |
 |----------|----------|
-| Peak FP16 compute | 1,979 TFLOPS |
+| Peak FP16 compute | 989 TFLOPS |
 | Memory bandwidth | 3.35 TB/s |
-| Ratio | 590 FLOPS/byte |
+| Ratio | 295 FLOPS/byte |
 
-What does this mean? For every byte you move from memory, you need to do 590 operations to keep the compute units busy. If you do fewer, the compute units sit idle waiting for data.
+What does this mean? For every byte you move from memory, you need to do about 300 operations to keep the compute units busy (for dense FP16). If you do fewer, the compute units sit idle waiting for data.
 
 For comparison, here's a CPU:
 
@@ -118,11 +118,11 @@ The **ridge point** is where these meet:
 
 $$\text{Ridge Intensity} = \frac{\text{Peak FLOPS}}{\text{Bandwidth}}$$
 
-For an H100: 1979 TFLOPS / 3.35 TB/s ≈ 590 FLOPS/byte.
+For an H100: 989 TFLOPS / 3.35 TB/s ≈ 295 FLOPS/byte.
 
-For operations with intensity below 590: you're memory-bound. Move data faster.
+For operations with intensity below 295: you're memory-bound. Move data faster.
 
-For operations with intensity above 590: you're compute-bound. Use better algorithms.
+For operations with intensity above 295: you're compute-bound. Use better algorithms.
 
 ## The Investigation: Where Does Attention Live?
 
@@ -157,7 +157,7 @@ For n=2048, d=64:
 
 $$I = \frac{4 \times 2048 \times 64}{6 \times 64 + 4 \times 2048} = \frac{524,288}{8,576} \approx 61 \text{ FLOPS/byte}$$
 
-That's well below the H100's ridge point of 590. **Attention is memory-bound.**
+That's well below the H100's ridge point of 295. **Attention is memory-bound.**
 
 Now here's the key insight: most of those bytes are the **attention matrix** (4n² bytes). If we could avoid materializing it—compute softmax incrementally, never storing the full n² matrix—we'd dramatically reduce data movement.
 
@@ -299,7 +299,7 @@ viewof peak_flops = Inputs.range([1, 2000], {
 })
 
 viewof bandwidth = Inputs.range([100, 5000], {
-  value: 3000,
+  value: 3350,
   step: 100,
   label: "Memory Bandwidth (GB/s)"
 })
