@@ -87,6 +87,10 @@ quarto render
 > Note: PDF output is currently disabled because OJS blocks cause rendering to hang.
 > See `_quarto.yml` for details and the suggested workaround.
 
+### Structure
+
+Chapter ordering is defined in `_quarto.yml`. Numeric prefixes in filenames are historical and not strictly sequential, so rely on the ToC instead of filenames.
+
 ## Style Guide
 
 ### Writing Style
