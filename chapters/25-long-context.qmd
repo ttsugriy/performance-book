@@ -7,7 +7,7 @@ id: sec-long-context
 ---
 
 ::: {.chapter-opener}
-Claude handles 200,000 tokens. Gemini claims 1 million. GPT-4 Turbo supports 128,000.
+As of early 2024/2025 public announcements, Claude lists 200,000 tokens, Gemini lists 1 million, and GPT-4 Turbo lists 128,000. Availability varies by model version and tier, and these numbers change quickly.
 
 Standard attention is O(n²). How do you attend to a million tokens?
 :::
@@ -40,8 +40,10 @@ Sequence    Memory (QK^T)    FLOPs
 256K        256 GB           128T
 1M          4 TB             2P
 
-A100 80GB: Can fit ~64K sequence with full attention matrices
-H100 80GB: Same constraint applies
+These numbers assume a single attention matrix (one layer, batch size 1, FP16). Full-model memory scales with layers and heads.
+
+A100 80GB: Can hold a handful of full attention matrices at 64K, but full-model full attention does not fit.
+H100 80GB: Similar constraint unless using multi-GPU sharding or sparse/streaming attention.
 ```
 
 FlashAttention (Chapter 10) solves the memory problem through chunking—but compute is still O(n²).
@@ -463,7 +465,7 @@ Quality impact: Usually <1% perplexity degradation
 
 ### Positional Encodings for Long Context
 
-Attention is permutation-equivariant—the same output for any ordering of tokens. For sequences, we *need* position to matter. Position encodings break this symmetry intentionally.
+Without positional encodings, self-attention is permutation-equivariant—the same output for any ordering of tokens. For sequences, we *need* position to matter. Positional encodings break this symmetry intentionally.
 
 But for long contexts, the choice of positional encoding becomes critical.
 
