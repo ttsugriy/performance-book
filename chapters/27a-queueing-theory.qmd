@@ -200,7 +200,9 @@ When P99 is too high, you have only a few knobs:
 - **Reduce utilization**: add capacity or shed load
 - **Reduce variance**: cap output length, normalize prompt sizes, separate phases
 - **Improve scheduling**: priority queues, preemption, SRPT
-- **Limit concurrency**: prevent the system from entering unstable regions
+- **Admission control**: token bucket or adaptive concurrency limits to prevent entering unstable regions
+
+Admission control is often the safest lever: reject or defer excess work early so the system never crosses $\rho \approx 1$.
 
 These are structural levers, not micro-optimizations.
 
