@@ -21,13 +21,13 @@ LLaMA-7B training breakdown (batch size 1, seq 2048):
 
 Model parameters:       14.0 GB (FP16)
 Gradients:              14.0 GB (FP16)
-Optimizer state:        28.0 GB (FP32 Adam momentum + variance)
+Optimizer state:        56.0 GB (FP32 Adam momentum + variance)
 Activations:            ~8.0 GB (depends on checkpointing)
 Temporary buffers:      ~2.0 GB (cuBLAS workspace, etc.)
 ─────────────────────────────────────────────────────────
-Total:                  ~66 GB
+Total:                  ~94 GB
 
-A100 80GB: Fits
+A100 80GB: Doesn't fit without optimizer sharding or 8-bit optimizers
 A100 40GB: Doesn't fit
 ```
 

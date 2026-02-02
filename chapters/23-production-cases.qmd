@@ -220,7 +220,7 @@ Hardware: 8x A100 40GB
 Serving: vLLM
 Throughput: 50 requests/sec
 P99 latency: 800ms
-Cost: $50K/month
+Cost: ~$20K/month GPU-only (≈$50K/month all-in)
 ```
 
 ### Investigation Path 1: Quantization
@@ -300,7 +300,7 @@ P99 latency: 800ms → 920ms (within 1s budget)
 
 **Hypothesis**: We might be over-provisioned.
 
-Current: 8× A100 40GB at $3.50/GPU/hour = $20,160/month
+Current (GPU-only): 8× A100 40GB at $3.50/GPU/hour = $20,160/month
 
 With 7× throughput, we need:
 
