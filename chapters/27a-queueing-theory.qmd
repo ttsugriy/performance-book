@@ -10,6 +10,8 @@ Your median latency is fine. Your P99 is terrible.
 Utilization went from 60% to 75%, and suddenly the queue never empties. What happened?
 ::::
 
+![](../assets/queueing/queueing-theory.png){fig-cap="Queueing theory: smooth flow turns into a latency cliff near saturation."}
+
 ## The Simplest Model
 
 Every serving system, no matter how complex, has two clocks:
@@ -36,6 +38,8 @@ Where:
 
 Little's Law is model-free. It doesn't care about distributions or scheduling. If you can measure two of the three, the third is fixed.
 
+![](../assets/queueing/littles-law.png){fig-cap="Little's Law links arrival rate, time in system, and in-flight work."}
+
 **Example**: If your system handles 200 req/s and the average request spends 0.25s end-to-end, then $L = 200 \times 0.25 = 50$ requests in-flight.
 
 ## The Latency Cliff
@@ -45,6 +49,8 @@ For an M/M/1 queue (Poisson arrivals, exponential service time), the expected la
 $$W = \frac{1}{\mu - \lambda}$$
 
 This equation shows the **latency cliff**: as $\lambda \to \mu$, latency diverges.
+
+![](../assets/queueing/latency-cliff.png){fig-cap="Expected latency grows sharply as utilization approaches 1."}
 
 ```
 Utilization (ρ)   Expected W (in units of mean service time)
@@ -173,6 +179,8 @@ $$S = S_{prefill} + n_{tokens} \cdot S_{decode}$$
 
 then variance comes from output length. Long generations create heavy tails even if the mean is small.
 
+![](../assets/queueing/output-length-variance.png){fig-cap="Output length variability in decode drives tail latency."}
+
 **Mitigations**:
 
 - Separate queues for prefill and decode
@@ -190,6 +198,8 @@ $$W_{batch} \approx \frac{b - 1}{2\lambda} \quad \text{(Poisson arrivals)}$$
 Total latency becomes:
 
 $$W \approx W_{queue} + W_{batch} + W_{service}$$
+
+![](../assets/queueing/batching-tradeoff.png){fig-cap="Batch size trades throughput for tail latency; the knee is the sweet spot."}
 
 Dynamic batching tries to live near the knee: enough batch size to raise $\mu$, but not so much delay that P99 explodes.
 
