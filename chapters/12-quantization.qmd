@@ -268,18 +268,24 @@ GPTQ (Generative Pretrained Transformer Quantization) uses an insight from optim
 ```python
 def gptq_quantize_layer(W, H, bits=4):
     """
-    GPTQ: Quantize weights using Hessian information.
+    GPTQ: Quantize weights using inverse Hessian information.
 
     W: Weight matrix to quantize
     H: Hessian (approximated as X^T X from calibration data)
+
+    The key insight: use the inverse Hessian to optimally distribute
+    quantization error to unquantized weights, minimizing the
+    second-order approximation of the output loss.
     """
     n, m = W.shape
     Q = np.zeros_like(W)  # Quantized weights
 
-    # Process columns in order of Hessian diagonal
-    order = np.argsort(np.diag(H))[::-1]  # Most important first
+    # Compute the inverse Hessian (with damping for numerical stability)
+    damp = 0.01 * np.mean(np.diag(H))
+    H_inv = np.linalg.inv(H + damp * np.eye(m))
 
-    for i in order:
+    # Process columns in order
+    for i in range(m):
         # Current column
         w = W[:, i]
 
@@ -290,11 +296,11 @@ def gptq_quantize_layer(W, H, bits=4):
         # Compute quantization error
         error = w - Q[:, i]
 
-        # Update remaining columns to compensate
-        # This is the key insight: distribute the error
+        # Update remaining columns to compensate using inverse Hessian
+        # This is the key insight from Optimal Brain Quantization:
+        # distribute the error weighted by H_inv to minimize loss
         for j in range(i + 1, m):
-            if j not in order[:i]:
-                W[:, j] -= error * H[i, j] / H[i, i]
+            W[:, j] -= error * H_inv[i, j] / H_inv[i, i]
 
     return Q
 ```
@@ -349,8 +355,8 @@ def smooth_quant_transform(X, W, alpha=0.5):
       alpha=0.5: balanced (typically best)
     """
     # Compute per-channel scales
-    act_scales = X.abs().max(dim=0)  # Activation ranges
-    weight_scales = W.abs().max(dim=0)  # Weight ranges
+    act_scales = X.abs().max(dim=0).values  # Activation ranges
+    weight_scales = W.abs().max(dim=0).values  # Weight ranges
 
     # Smooth factor
     s = (act_scales ** alpha) / (weight_scales ** (1 - alpha))
@@ -371,13 +377,13 @@ Quantization isn't just about memory—it's about compute speed.
 Modern GPUs have specialized hardware for integer matrix multiply:
 
 ```
-NVIDIA A100 (per SM):
+NVIDIA A100 (total chip throughput):
   FP32: 19.5 TFLOPS
-  FP16: 156 TFLOPS (8× faster)
-  INT8: 624 TOPS (32× faster than FP32)
+  FP16 (Tensor Core): 312 TFLOPS (16× faster)
+  INT8 (Tensor Core): 624 TOPS (32× faster than FP32)
 
 The speedup compounds with memory savings:
-  FP16 → INT8: 2× memory reduction × 4× compute speedup = 8× throughput
+  FP16 → INT8: 2× memory reduction × 2× compute speedup = 4× throughput
 ```
 
 But there's a catch: quantization overhead.
