@@ -511,7 +511,7 @@ flowchart TD
 ### The Automatic Savings
 
 ```python
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 
 with autocast():
     # Activations stored in FP16: 2x memory reduction

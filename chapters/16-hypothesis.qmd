@@ -12,15 +12,13 @@ Before you optimize, you must answer: *what* is slow, and *why*?
 Getting this wrong means optimizing the wrong thing. Getting this right means the optimization is often obvious.
 :::
 
-## The Premature Optimization Trap
+## The Diagnostic Imperative
 
-Everyone knows Knuth's quote: "Premature optimization is the root of all evil."
+Richard Feynman described his approach to problem-solving: "The first principle is that you must not fool yourself—and you are the easiest person to fool."
 
-Fewer people know the full quote: "We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil. **Yet we should not pass up our opportunities in that critical 3%.**"
+Performance optimization is particularly susceptible to self-deception. We think we know what's slow. We're usually wrong.
 
-The question is: how do you find that critical 3%?
-
-Not by guessing. By forming and testing hypotheses.
+The question isn't "what should I optimize?" but "what is *actually* the bottleneck?" Not by guessing. By forming and testing hypotheses.
 
 ## The Diagnostic Questions
 

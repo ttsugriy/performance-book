@@ -99,7 +99,7 @@ Pure low-precision training often fails. Mixed precision—computing in FP16/BF1
 
 ```python
 import torch
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 # 1. Create a scaler to prevent gradient underflow
 scaler = GradScaler()

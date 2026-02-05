@@ -455,12 +455,12 @@ for i, batch in enumerate(dataloader):
 ### Mixed Precision
 
 ```python
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 scaler = GradScaler()
 
 for batch in dataloader:
-    with autocast():  # FP16 forward/backward
+    with autocast('cuda'):  # FP16 forward/backward
         loss = model(batch)
 
     scaler.scale(loss).backward()
