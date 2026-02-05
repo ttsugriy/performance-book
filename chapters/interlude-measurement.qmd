@@ -2,9 +2,9 @@
 id: sec-interlude-measurement
 ---
 
-# Interlude: A Measurement Mindset {.unnumbered}
+# Interlude: The Measurement Toolkit {.unnumbered}
 
-Before we dive into the mathematical properties that enable optimization, we need to establish a crucial skill: the ability to measure performance accurately. This brief interlude introduces the mindset you'll need for the investigations ahead.
+Before we dive into the mathematical properties that enable optimization, we need to establish a crucial skill: the ability to measure performance accurately. You'll need these tools starting in Part I, not in some later chapter.
 
 ## The First Principle
 
@@ -14,63 +14,145 @@ Performance optimization follows a simple rule:
 
 This sounds obvious, but it's violated constantly. Developers optimize code based on intuition, past experience, or "common knowledge"—and often make things worse or optimize the wrong thing entirely.
 
-## What to Measure
+## The Three Diagnostic Questions
 
-Three questions guide every performance investigation:
+Every performance investigation starts with three questions:
 
-1. **Where is time spent?** Identify which operations consume the most time.
-2. **Why is it slow?** Determine the limiting resource (compute, memory, I/O).
-3. **What's the theoretical limit?** Know when you've extracted most available performance.
+1. **Where is time spent?** → Identify the hotspot
+2. **Why is it slow?** → Determine the limiting resource (compute, memory, I/O)
+3. **What's the theoretical limit?** → Know how close you are and when to stop
 
-## The Roofline Preview
+## Essential Measurement Toolkit
 
-The next chapter (@sec-bandwidth) introduces the roofline model. It tells us the maximum achievable performance for any operation based on its arithmetic intensity:
+### Timing: Do It Right
+
+```python
+import time
+
+def benchmark(fn, *args, warmup=3, trials=10):
+    """Robust benchmarking pattern."""
+    # Warmup: let JIT compile, caches warm, etc.
+    for _ in range(warmup):
+        fn(*args)
+
+    # Measure multiple trials
+    times = []
+    for _ in range(trials):
+        start = time.perf_counter()
+        fn(*args)
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    # Report median (robust to outliers from GC, OS scheduling)
+    times.sort()
+    return times[len(times) // 2]
+```
+
+**Why median, not mean?** Performance measurements are typically right-skewed — occasional spikes from garbage collection, thermal throttling, or OS scheduling inflate the mean. The median represents the "typical" run.
+
+### GPU Timing: Synchronize!
+
+```python
+import torch
+
+def gpu_benchmark(fn, *args, warmup=5, trials=20):
+    """GPU benchmarking — must synchronize."""
+    for _ in range(warmup):
+        fn(*args)
+    torch.cuda.synchronize()  # Wait for GPU to finish
+
+    times = []
+    for _ in range(trials):
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        fn(*args)
+        torch.cuda.synchronize()  # Don't time async launches!
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    times.sort()
+    return times[len(times) // 2]
+```
+
+::: {.callout-warning}
+## The #1 GPU Benchmarking Mistake
+
+Without `torch.cuda.synchronize()`, you measure the time to *launch* the kernel, not to *execute* it. GPU operations are asynchronous — `torch.matmul()` returns immediately while the GPU is still computing. This can make operations appear 100× faster than they actually are.
+:::
+
+### The Roofline Quick Check
+
+The next chapter (@sec-bandwidth) introduces the roofline model in detail. For now, here's the essential check:
 
 $$\text{Performance} \leq \min(\text{Peak FLOPS}, \text{Bandwidth} \times \text{Arithmetic Intensity})$$
 
-If your code achieves 50% of the roofline limit, you've done reasonably well. If it achieves 5%, there's significant room for improvement—and you should investigate why.
+```python
+def roofline_check(measured_tflops, measured_bandwidth_gb_s, arithmetic_intensity):
+    """Quick check: are you compute-bound or memory-bound?"""
+    # Example: A100 specs
+    peak_tflops = 312       # FP16 tensor core
+    peak_bw_gb_s = 2000     # HBM bandwidth
 
-## Quick Measurement Techniques
+    compute_bound = peak_tflops
+    memory_bound = peak_bw_gb_s * arithmetic_intensity / 1000  # Convert to TFLOPS
 
-For the investigations in this book, you'll need:
+    roofline = min(compute_bound, memory_bound)
+    utilization = measured_tflops / roofline
 
-**Timing**: Use high-resolution timers (`time.perf_counter()` in Python, `std::chrono::high_resolution_clock` in C++). Run multiple trials and report medians or percentiles, not means.
+    if arithmetic_intensity < peak_tflops * 1000 / peak_bw_gb_s:
+        regime = "MEMORY-BOUND"
+    else:
+        regime = "COMPUTE-BOUND"
 
-**Profiling**: CPU profilers (perf, VTune) and GPU profilers (Nsight, nvprof) reveal where time actually goes. They often surprise us.
+    print(f"Regime: {regime}")
+    print(f"Roofline: {roofline:.1f} TFLOPS")
+    print(f"Measured: {measured_tflops:.1f} TFLOPS")
+    print(f"Utilization: {utilization:.0%}")
+```
 
-**Memory tracking**: Monitor memory bandwidth utilization. A memory-bound kernel running at 80% of peak bandwidth is nearly optimal for its arithmetic intensity.
+If utilization > 50%, you're doing well. If < 10%, there's a large gap to investigate.
 
-## The Investigation Framework
+### The Hypothesis Pattern
 
-Each investigation in Part III follows a pattern:
+When performance disappoints, form a hypothesis and test it:
+
+```
+Observation: My matmul achieves 5% of peak
+Hypothesis 1: Memory-bound (low arithmetic intensity)
+  Test: Calculate AI = FLOPs / bytes. AI = N/6 for matmul. At N=4096, AI=683.
+        That's above the ridge point. Not memory-bound.
+Hypothesis 2: Poor memory access pattern (uncoalesced)
+  Test: Profile with Nsight. Check "Global Load Efficiency."
+  Result: 12% efficiency — confirmed! Fix coalescing.
+```
+
+This scientific approach — hypothesis, experiment, analysis — prevents wasted effort on ineffective optimizations. We'll develop it fully in @sec-hypothesis.
+
+## The Investigation Pattern
+
+Each investigation in this book follows a consistent pattern:
 
 1. **Baseline**: Measure the naive implementation
-2. **Bound**: Calculate the theoretical limit
-3. **Gap analysis**: Why is actual << theoretical?
-4. **Hypothesis**: What optimization should help?
-5. **Experiment**: Implement and measure
-6. **Iterate**: Repeat until satisfied or at roofline
+2. **Bound**: Calculate the theoretical limit (roofline, algorithmic complexity)
+3. **Gap analysis**: Why is actual performance << theoretical?
+4. **Property audit**: Which of the six properties apply?
+5. **Derive**: The matching property suggests the optimization
+6. **Implement and measure**: Did it work?
+7. **Iterate**: New bottleneck? Back to step 3.
 
-This scientific approach—hypothesis, experiment, analysis—prevents wasted effort on ineffective optimizations.
-
-## A Warning About Microbenchmarks
+## Microbenchmark Pitfalls
 
 Microbenchmarks measure small, isolated pieces of code. They're useful but dangerous:
 
-- **Warmup matters**: First runs include JIT compilation, cache warming, and other one-time costs
-- **Context matters**: Code behaves differently in isolation vs. real workloads
-- **Statistics matter**: Report distributions, not single numbers
-
-We'll cover these topics in depth in @sec-measurement. For now, remember: be skeptical of any single timing measurement.
-
-## Moving Forward
-
-With this measurement mindset, you're ready to explore the algebra of efficiency. As we examine associativity, separability, sparsity, and locality, keep asking: "How would I measure if this optimization actually helps?"
-
-The best performance engineers aren't those who know the most tricks—they're those who measure most carefully.
+- **Warmup matters**: First runs include JIT compilation, cache warming, and other one-time costs. Always discard warmup iterations.
+- **Context matters**: Code behaves differently in isolation vs. real workloads. A kernel that's fast alone may be slow when competing for cache with other operations.
+- **Statistics matter**: Report medians and percentiles, not single numbers. If results vary by >10% across runs, your measurement setup has a problem.
+- **GPU clocks drift**: Thermal throttling can reduce GPU clocks by 10-20% during sustained workloads. Profile steady-state, not burst performance.
 
 ::: {.callout-note}
-## Full Methodology
+## Full Methodology and Tools
 
-Part IV (@sec-measurement, @sec-hypothesis, @sec-analogy) provides comprehensive coverage of measurement techniques, hypothesis-driven debugging, and the pattern library. Consider reading those chapters after completing Part II if you want a deeper foundation before tackling the investigations.
+Part V (@sec-measurement, @sec-hypothesis) provides comprehensive coverage of measurement techniques and hypothesis-driven debugging. Part VI (@sec-profiling-tools) covers profiling tools (perf, Nsight, PyTorch Profiler) in depth.
+
+The toolkit above is sufficient for all investigations in Parts I through IV. Return to Parts V-VI when you need advanced methodology or tool-specific guidance.
 :::
