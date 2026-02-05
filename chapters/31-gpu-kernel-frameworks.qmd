@@ -4,8 +4,6 @@ subtitle: "From Triton to CuTile, CuTe, and ThunderKittens"
 id: sec-gpu-kernel-frameworks
 ---
 
----
-
 ::: {.chapter-opener}
 Writing fast GPU kernels used to mean writing CUDA C++. Not anymore.
 

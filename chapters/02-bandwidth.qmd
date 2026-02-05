@@ -4,8 +4,6 @@ subtitle: "Why Moving Data Often Costs More Than Computing"
 id: sec-bandwidth
 ---
 
----
-
 ::: {.chapter-opener}
 An H100 GPU can perform about 1,000 trillion operations per second for dense FP16. It can move about 3.35 trillion bytes per second from memory. That's roughly 300 operations per byte. FP8 peaks are higher, which raises the ridge point. If your algorithm does far fewer than ~300 operations per byte, you're not computing—you're waiting.
 

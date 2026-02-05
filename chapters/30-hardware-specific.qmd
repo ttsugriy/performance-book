@@ -4,8 +4,6 @@ subtitle: "Getting Maximum Performance from Different Accelerators"
 id: sec-hardware-specific
 ---
 
----
-
 ::: {.chapter-opener}
 Code that's optimal on an A100 may be suboptimal on an H100. What's fast on NVIDIA may be slow on AMD.
 

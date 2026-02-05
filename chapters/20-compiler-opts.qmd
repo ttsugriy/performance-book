@@ -4,8 +4,6 @@ subtitle: "What Happens to Your Code"
 id: sec-compiler-opts
 ---
 
----
-
 ::: {.chapter-opener}
 You write code. The compiler transforms it. Sometimes by 100×.
 

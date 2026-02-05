@@ -4,8 +4,6 @@ subtitle: "Understanding Allocation, Fragmentation, and Optimization"
 id: sec-gpu-memory
 ---
 
----
-
 ::: {.chapter-opener}
 "CUDA out of memory" is the most common training failure.
 

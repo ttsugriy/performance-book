@@ -4,8 +4,6 @@ subtitle: "The Hidden Variable in Every Computation"
 id: sec-numerical-precision
 ---
 
----
-
 ::: {.chapter-opener}
 Every floating-point number is a lie. Some lies are close enough to the truth. Understanding which lies matter—and which don't—is essential for both correctness and performance.
 :::

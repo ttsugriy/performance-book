@@ -4,8 +4,6 @@ subtitle: "War Stories from Real Systems"
 id: sec-production-cases
 ---
 
----
-
 ::: {.chapter-opener}
 Theory teaches you what's possible. Production teaches you what actually goes wrong. This chapter presents real performance investigations—the kind that start with "the system is slow" and end with root cause and fix.
 :::

@@ -4,8 +4,6 @@ subtitle: "Production Techniques for High-Throughput Inference"
 id: sec-advanced-serving
 ---
 
----
-
 ::: {.chapter-opener}
 Serving LLMs at scale is a systems engineering challenge. Latency SLAs, cost efficiency, and reliability all matter.
 

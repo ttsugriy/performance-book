@@ -4,8 +4,6 @@ subtitle: "Understanding PyTorch's JIT Compiler"
 id: sec-torch-compile
 ---
 
----
-
 ::: {.chapter-opener}
 One line of code. Up to 2x speedup. No model changes.
 

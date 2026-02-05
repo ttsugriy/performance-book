@@ -4,8 +4,6 @@ subtitle: "A Unified Theory of Performance Optimization"
 id: sec-algebraic-framework
 ---
 
----
-
 ::: {.chapter-opener}
 Every performance optimization exploits a mathematical property. Understanding these properties transforms optimization from art to science.
 

@@ -4,8 +4,6 @@ subtitle: "Understanding the True Cost of Coordination"
 id: sec-parallelism
 ---
 
----
-
 ::: {.chapter-opener}
 Parallelism promises: "More cores, more speed."
 

@@ -4,8 +4,6 @@ subtitle: "Scaling with Conditional Computation"
 id: sec-moe
 ---
 
----
-
 ::: {.chapter-opener}
 GPT-4 reportedly has over a trillion parameters. Yet it runs at reasonable speed. The secret: most parameters don't activate for any given token.
 

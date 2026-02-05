@@ -4,8 +4,6 @@ subtitle: "Mastering the Art of Measurement"
 id: sec-profiling-tools
 ---
 
----
-
 ::: {.chapter-opener}
 You can't optimize what you can't measure. But most engineers use profilers wrong.
 

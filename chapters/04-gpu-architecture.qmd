@@ -4,8 +4,6 @@ subtitle: "Understanding the Machine That Powers Modern ML"
 id: sec-gpu-architecture
 ---
 
----
-
 ::: {.chapter-opener}
 CPUs are designed for latency: finish one task as fast as possible. GPUs are designed for throughput: finish as many tasks as possible.
 

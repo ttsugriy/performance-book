@@ -4,8 +4,6 @@ subtitle: "Linear-Time Alternatives to Attention"
 id: sec-ssm
 ---
 
----
-
 ::: {.chapter-opener}
 Attention is O(n²). For a million tokens, that's a trillion operations per layer.
 

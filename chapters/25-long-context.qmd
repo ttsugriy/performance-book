@@ -4,8 +4,6 @@ subtitle: "Scaling to Millions of Tokens"
 id: sec-long-context
 ---
 
----
-
 ::: {.chapter-opener}
 As of early 2024/2025 public announcements, Claude lists 200,000 tokens, Gemini lists 1 million, and GPT-4 Turbo lists 128,000. Availability varies by model version and tier, and these numbers change quickly.
 
