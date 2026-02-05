@@ -464,6 +464,42 @@ The algorithm follows from the data-oriented analysis:
 2. Found algebraic property enabling elimination
 3. Reorganized computation around memory access
 
+## A Simpler Example: Parallel Reduction
+
+The FlashAttention case study above is spectacular but complex. The same pattern appears in much simpler form in **parallel reduction** — arguably the most universal building block in high-performance computing.
+
+**The loop version:**
+```python
+total = 0
+for x in data:
+    total += x
+```
+
+**The array version:**
+```python
+total = data.sum()  # or np.sum(data)
+```
+
+The loop version hides structure. The array version reveals it: this is a **reduction** — combining elements with an associative operator. Because addition is associative, the system can:
+
+- **Chunk** the data and compute partial sums on different cores
+- **Vectorize** using SIMD (add 8 numbers in one instruction)
+- **Tree-reduce** partial results in O(log n) steps
+
+This is the same pattern as FlashAttention (associative state combination), but stripped to its essence. Throughout this book, you'll see it again and again: **once you see the structure, the optimization follows**.
+
+::: {.callout-note}
+## Three Running Examples
+
+This book uses three main examples to illustrate the framework:
+
+1. **Parallel reduction** (Associativity + Parallelism): The simplest case — appears in summation, softmax, scanning, and distributed gradient sync
+2. **FlashAttention** (Associativity + Locality): The flagship — shows how algebraic structure enables algorithmic transformation
+3. **Depthwise separable convolution** (Separability + Symmetry): Shows how factoring and symmetry combine to reduce parameters by orders of magnitude
+
+Each exercises different properties and appears at different scales of complexity.
+:::
+
 ## The Synthesis
 
 Array-oriented thinking and data-oriented design converge on the same insight:
