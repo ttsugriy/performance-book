@@ -107,12 +107,12 @@ def analyze_weight_change(name, before, after):
     return S
 
 # Analyze attention layers
-for name, (p_before, p_after) in zip(
+for (name, p_before), (_, p_after) in zip(
     model_before.named_parameters(),
     model_after.named_parameters()
 ):
-    if 'attn' in name[0] and 'weight' in name[0]:
-        S = analyze_weight_change(name[0], p_before.data, p_after.data)
+    if 'attn' in name and 'weight' in name:
+        S = analyze_weight_change(name, p_before.data, p_after.data)
 ```
 
 Typical results show dramatic singular value decay:
