@@ -93,17 +93,23 @@ For a model with:
 - $d$ hidden dimension
 - $h$ attention heads
 
-**KV cache size**: $2 \times L \times n \times d \times \text{sizeof(dtype)}$
+**KV cache size** (standard multi-head attention): $2 \times L \times n \times d \times \text{sizeof(dtype)}$
 
-**Example: LLaMA-2 70B**
+With **Grouped-Query Attention (GQA)**, K and V are shared across groups of heads, reducing the cache:
+
+$$\text{KV cache} = 2 \times L \times n \times (\text{num\_kv\_heads} \times \text{head\_dim}) \times \text{sizeof(dtype)}$$
+
+**Example: LLaMA-2 70B** (uses GQA with 8 KV heads, head_dim=128)
 - 80 layers
-- 8192 hidden dim
+- 8 KV heads (not 64 query heads) with head_dim = 128
 - 2048 token context
 - FP16 (2 bytes)
 
-$$\text{KV cache} = 2 \times 80 \times 2048 \times 8192 \times 2 = 5.2\text{GB per sequence}$$
+$$\text{KV cache} = 2 \times 80 \times 2048 \times (8 \times 128) \times 2 = 0.67\text{GB per sequence}$$
 
-On an 80GB A100, the KV cache alone would allow ~15 concurrent sequences. In practice, model weights, fragmentation, and overhead reduce this number.
+Note: without GQA (full MHA with 64 KV heads), this would be $5.2\text{GB}$ — an 8x difference. GQA is why modern LLMs can serve many concurrent sequences.
+
+On an 80GB A100, after model weights (~35GB in INT4), the remaining memory can support dozens of concurrent sequences.
 
 ### Compute Savings
 
@@ -259,7 +265,7 @@ def speculative_decode(target_model, draft_model, prompt, k=4):
 - Quantized version
 - Early-exit from target model
 
-**Tradeoff**: Requires 2× compute (draft + target). Only beneficial when memory-bound, not compute-bound.
+**Tradeoff**: Requires additional compute for the draft model. Since the draft model is typically 10-20× smaller than the target, total compute overhead is ~1.1-1.2×, not 2×. The technique is most beneficial when the target model is memory-bound (decode phase), where the draft model's overhead is negligible compared to the time saved by accepting multiple tokens per target forward pass.
 
 ## Quantization for Inference
 
