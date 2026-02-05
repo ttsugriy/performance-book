@@ -607,3 +607,21 @@ The accompanying notebook lets you:
 - Peng et al. (2023). "RWKV: Reinventing RNNs for the Transformer Era"
 - Lieber et al. (2024). "Jamba: A Hybrid Transformer-Mamba Language Model"
 - Dao & Gu (2024). "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality" (Mamba-2)
+
+---
+
+::: {.callout-important}
+## Part III Challenge Problems
+
+These problems have no provided solutions. They require applying the framework to new algorithms.
+
+**Challenge 1: Derive Ring Attention**
+Given: multiple GPUs, each holding a shard of the KV cache. The full attention matrix doesn't fit on any single GPU. Using the property audit approach, identify which properties enable distributed attention computation. Design an algorithm (hint: it involves a ring topology for KV passing). What's the communication cost?
+
+**Challenge 2: Speculative Decoding as Property Exploitation**
+Speculative decoding uses a draft model to generate K tokens, then verifies with the target model. Frame this optimization in terms of the six properties. Which properties explain why it works? Why does the acceptance rate determine the speedup?
+
+**Challenge 3: Beyond Attention**
+Graph neural networks (GNNs) aggregate neighbor features: $h_i' = \text{AGG}(\{h_j : j \in \mathcal{N}(i)\})$. Which properties does this operation have? How would you optimize it for power-law degree distributions (where a few nodes have millions of neighbors)?
+:::
+

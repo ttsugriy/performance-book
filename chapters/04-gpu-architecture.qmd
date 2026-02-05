@@ -655,3 +655,21 @@ By week 5, you'll understand why GPU code behaves the way it does.
 - NVIDIA Developer Blog: https://developer.nvidia.com/blog/
 - Nsight Compute documentation
 
+---
+
+::: {.callout-important}
+## Part I Challenge Problems
+
+These problems have no provided solutions. They require combining concepts from all four Part I chapters.
+
+**Challenge 1: The Bandwidth Ceiling**
+Your model processes 1024 tokens with hidden_dim=4096 in FP16. A single transformer layer has: QKV projection (3 matmuls), attention, output projection, two FFN matmuls. Calculate the total FLOPs and bytes moved for one layer. Is it compute-bound or memory-bound on an A100? At what batch size does it cross the roofline ridge point?
+
+**Challenge 2: The Memory Wall**
+Design an experiment that demonstrates the transition from L2-resident to HBM-resident performance for a simple operation (e.g., vector add). Predict where the transition occurs for an A100 (40MB L2), then measure. How does the measured transition compare to your prediction?
+
+**Challenge 3: The Parallelism Trap**
+You have a transformer model with 32 layers. Each layer takes 10ms to compute. Pipeline parallelism across 4 GPUs gives 8 layers per GPU. With 16 microbatches, what's the pipeline bubble fraction? At what number of microbatches does the bubble drop below 5%? Now factor in the 0.5ms inter-GPU communication per boundary — how does this change your answer?
+:::
+
+

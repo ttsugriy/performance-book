@@ -431,4 +431,21 @@ The accompanying notebook walks through:
 
 ---
 
+::: {.callout-important}
+## Part II Challenge Problems
+
+These problems have no provided solutions. They require combining multiple properties.
+
+**Challenge 1: Property Discovery**
+Take an optimization you use regularly (e.g., gradient checkpointing, mixed precision training, weight tying in language models). Which of the six properties does it exploit? Can you identify one that uses properties from BOTH tiers (algebraic + structural)?
+
+**Challenge 2: Novel Combination**
+The framework identifies six properties. Most known optimizations use 1-2. Can you design an optimization that simultaneously exploits THREE or more properties? Describe the problem, the properties, and the optimization. (Hint: consider a sparse, low-rank, quantized attention mechanism.)
+
+**Challenge 3: Counter-Framework**
+Find a significant optimization that genuinely doesn't fit any of the six properties. What does this tell you about the framework's boundaries? (This is a serious question — the framework should be tested honestly.)
+:::
+
+---
+
 [**Part III: Algorithm Investigations →**](09-matrix-multiply.qmd)
