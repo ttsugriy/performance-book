@@ -55,41 +55,48 @@ Part II also covers **reversibility** (invertibility of computations), which ena
 ```
 THE PERIODIC TABLE OF OPTIMIZATION
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│  ASSOCIATIVITY          SEPARABILITY           LOCALITY                    │
-│  (a ⊕ b) ⊕ c = a ⊕ (b ⊕ c)   A = UV^T             f(x) depends only       │
-│                                                    on nearby x             │
-│  Enables:               Enables:                Enables:                   │
-│  • Chunking             • Factorization         • Tiling                   │
-│  • Streaming            • Low-rank approx       • Blocking                 │
-│  • Parallelization      • Decomposition         • Caching                  │
-│  • Reduction trees      • Separation of vars    • Reordering               │
-│                                                                             │
-│  Examples:              Examples:               Examples:                  │
-│  • FlashAttention       • LoRA                  • Blocked matmul           │
-│  • Parallel prefix      • Depthwise conv        • Tiled convolution        │
-│  • Online softmax       • SVD compression       • Cache-oblivious algs     │
-│                                                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  SPARSITY               REDUNDANCY              SYMMETRY                   │
-│  Most elements are      Information content     f(x) = f(g(x)) for        │
-│  zero or negligible     < representation size   some transformation g     │
-│                                                                             │
-│  Enables:               Enables:                Enables:                   │
-│  • Skipping zeros       • Quantization          • Weight sharing           │
-│  • Conditional compute  • Compression           • Equivariant networks     │
-│  • Attention sparsity   • Caching               • Convolution              │
-│  • Expert selection     • Approximation         • Symmetry reduction       │
-│                                                                             │
-│  Examples:              Examples:               Examples:                  │
-│  • MoE routing          • INT8/INT4 quant       • CNN weight sharing       │
-│  • Top-k attention      • KV cache              • Group equivariance       │
-│  • Pruning              • Prefix caching        • Fourier methods          │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+╔═══════════════════════════════════════════════════════════════════════╗
+║  TIER 1: ALGEBRAIC PROPERTIES                                       ║
+║  Properties of the OPERATIONS — guarantee correctness of transforms ║
+╠═════════════════════════════╦═══════════════════════════════════════╣
+║                             ║                                       ║
+║  ASSOCIATIVITY              ║  SEPARABILITY                        ║
+║  (a ⊕ b) ⊕ c = a ⊕ (b ⊕ c)  ║  A = UV^T (low-rank decomposition)   ║
+║                             ║                                       ║
+║  Enables:                   ║  Enables:                             ║
+║  • Chunking / streaming     ║  • Factorization                     ║
+║  • Parallelization          ║  • Low-rank approximation            ║
+║  • Reduction trees          ║  • Decomposition                     ║
+║                             ║                                       ║
+║  You can PROVE the          ║  You can PROVE the factored           ║
+║  reordered result equals    ║  computation equals the original      ║
+║  the original               ║                                       ║
+║                             ║                                       ║
+║  FlashAttention, prefix     ║  LoRA, depthwise separable conv,     ║
+║  scan, online softmax       ║  SVD compression                     ║
+╠═════════════════════════════╩═══════════════════════════════════════╣
+║  TIER 2: STRUCTURAL PROPERTIES                                      ║
+║  Properties of the DATA/PROBLEM — enable empirical exploitation     ║
+╠════════════════╦════════════════╦════════════════╦═══════════════════╣
+║                ║                ║                ║                   ║
+║  SPARSITY      ║  REDUNDANCY    ║  LOCALITY      ║  SYMMETRY        ║
+║  Most values   ║  Info content  ║  Dependencies  ║  Invariance      ║
+║  are zero      ║  < repr. size  ║  are local     ║  under transform ║
+║                ║                ║                ║                   ║
+║  Skip work     ║  Compress      ║  Tile/block    ║  Share params    ║
+║  MoE, pruning  ║  Quantization  ║  Cache reuse   ║  CNNs, Fourier   ║
+║                ║  KV cache      ║  Matmul tiling ║  Group equiv.    ║
+╚════════════════╩════════════════╩════════════════╩═══════════════════╝
+
+REVERSIBILITY (bonus): Invertible computations enable memory savings
+via recomputation. Complements the six properties above.
 ```
+
+The two tiers reflect a fundamental distinction:
+
+- **Tier 1 (Algebraic)** properties are about the *operations*: you can look at a mathematical expression and determine whether it has them. When present, they **guarantee** that a transformation preserves correctness. Associativity means you *can* reorder; separability means you *can* factorize.
+
+- **Tier 2 (Structural)** properties are about the *data or problem*: they describe the shape of the input, the access pattern, or the problem's symmetries. They **enable** exploitation but require empirical validation — quantizing to INT4 *usually* works because weights are redundant, but you must measure quality to confirm.
 
 ### Property 1: Associativity
 
