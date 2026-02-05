@@ -1,28 +1,41 @@
 ---
-title: "Capstone: Optimizing a Novel Problem"
-subtitle: "Applying the Framework from Scratch"
+title: "Capstone: The Framework in Your Hands"
+subtitle: "Three Problems, Six Properties, One Method"
 id: sec-capstone
 ---
 
 ::: {.chapter-opener}
 You've learned the properties. You've studied the case studies.
 
-Now we face a problem you haven't seen before—and derive the optimization from first principles.
+Now we face three problems you haven't seen optimized before — spanning ML, systems, and scientific computing. For each, we apply the framework from first principles and see which properties unlock the optimization.
+
+The goal isn't to memorize these solutions. It's to internalize the *process* so you can do this yourself.
 :::
 
-## The Challenge
+## The Method
 
-This chapter applies everything we've learned to a novel problem: **optimizing Mamba-style state space models for inference**.
+Every investigation follows the same loop:
 
-We'll walk through the complete process:
-1. Understand the computation
-2. Profile to find bottlenecks
-3. Identify applicable properties
-4. Derive optimizations
-5. Implement and measure
-6. Iterate
+1. **Understand** the computation
+2. **Profile** to find bottlenecks
+3. **Audit properties** — systematically check all six
+4. **Derive** the optimization from the matching property
+5. **Implement** and measure
+6. **Iterate** until satisfied
 
-This mirrors how you'll approach new optimization problems in practice.
+We'll apply this to three problems of increasing breadth:
+
+| Problem | Domain | Primary Properties | Key Insight |
+|---------|--------|--------------------|-------------|
+| Mamba scan | ML inference | Associativity + Locality | Sequential recurrence → parallel scan |
+| Streaming top-K | Data analytics | Associativity + Redundancy | Exact ranking from partial heaps |
+| N-body simulation | Scientific computing | Separability + Locality | Far-field approximation via multipole |
+
+---
+
+## Problem 1: Mamba Scan (ML Inference)
+
+This problem applies everything we've learned to **optimizing Mamba-style state space models for inference**.
 
 ## Understanding Mamba
 
@@ -409,26 +422,193 @@ If d_state is large enough (e.g., 64), tensor cores can accelerate the matrix op
 **3. Optimize memory layout:**
 Transpose for coalesced access patterns on the critical path.
 
+---
+
+## Problem 2: Streaming Top-K (Data Analytics)
+
+**Domain**: You're building a real-time analytics system. Billions of events per hour, and you need the top-1000 events by score — continuously updated.
+
+### The Naive Approach
+
+```python
+def top_k_naive(events, k=1000):
+    """Sort everything, take top K."""
+    return sorted(events, key=lambda e: e.score, reverse=True)[:k]
+```
+
+For 1 billion events: sorting is O(n log n) ≈ 30 billion comparisons. At 1 GHz, that's 30 seconds. You need answers in milliseconds.
+
+### Property Audit
+
+| Property | Applies? | How? |
+|----------|----------|------|
+| **Associativity** | **Yes** | top-K of top-K chunks = global top-K |
+| **Separability** | No | No factorization structure |
+| **Sparsity** | Partial | Most elements are irrelevant (not top-K) |
+| **Locality** | Partial | Streaming access pattern |
+| **Redundancy** | **Yes** | We don't need exact order, just the top K |
+| **Symmetry** | No | No invariance structure |
+
+### The Key Insight: Associativity of Top-K
+
+If you split data into chunks and take the top-K of each chunk, then the top-K of all the chunk-level top-Ks is the global top-K. This is because top-K is a **selection** that preserves an **associative** merge operation:
+
+```python
+def merge_top_k(top_k_a, top_k_b, k):
+    """Merge two top-K sets. Associative!"""
+    combined = top_k_a + top_k_b     # 2K elements
+    combined.sort(reverse=True)       # Sort 2K elements
+    return combined[:k]               # Take top K
+
+# (merge(A, B), C) == merge(A, merge(B, C))  ✓ Associative!
+```
+
+### The Optimization
+
+```python
+def streaming_top_k(event_stream, k=1000, chunk_size=100_000):
+    """Process billion events with O(K) memory."""
+    import heapq
+
+    # Min-heap of size K: tracks the K largest seen so far
+    heap = []
+
+    for event in event_stream:
+        if len(heap) < k:
+            heapq.heappush(heap, (event.score, event))
+        elif event.score > heap[0][0]:  # Bigger than smallest in top-K?
+            heapq.heapreplace(heap, (event.score, event))
+
+    return sorted(heap, reverse=True)
+```
+
+**Performance**: O(n log K) time, O(K) memory. For n=1B, K=1000: ~10 billion ops vs 30 billion for sorting. But the real win is **streaming**: we never materialize the full dataset.
+
+**Parallelization** (from associativity): Each core maintains its own top-K heap. Merge heaps pairwise in O(K log K) — the merge is associative.
+
+**Redundancy exploitation**: We can use approximate top-K (e.g., Count-Min Sketch) when exact ranking isn't needed, trading accuracy for 10-100× speed.
+
+### What the Framework Revealed
+
+Without the framework, you might reach for "use a database" or "sort in MapReduce." The property audit reveals that **associativity** (of the merge operation) enables streaming and parallelization, while **redundancy** (most events are irrelevant) means we only need O(K) memory. This is the same associativity pattern as FlashAttention's online softmax — different domain, same algebra.
+
+---
+
+## Problem 3: N-Body Simulation (Scientific Computing)
+
+**Domain**: Simulate gravitational interactions between N = 1,000,000 particles. Each particle exerts force on every other. The naive approach: O(N²) = 10¹² force calculations per timestep.
+
+### The Naive Approach
+
+```python
+def nbody_naive(positions, masses):
+    """O(N²) all-pairs force calculation."""
+    N = len(positions)
+    forces = np.zeros_like(positions)
+
+    for i in range(N):
+        for j in range(N):
+            if i != j:
+                r = positions[j] - positions[i]
+                dist = np.linalg.norm(r)
+                forces[i] += masses[j] * r / (dist**3 + 1e-10)
+
+    return forces
+```
+
+At 1M particles: 10¹² operations per step. Even at 10 TFLOPS (GPU), that's 100 seconds per timestep. Simulations need thousands of steps. Intractable.
+
+### Property Audit
+
+| Property | Applies? | How? |
+|----------|----------|------|
+| **Associativity** | Yes | Force is a sum — can be tree-reduced |
+| **Separability** | **Yes** | Far-field interactions are low-rank |
+| **Sparsity** | Partial | Near-field forces dominate; far-field is "smooth" |
+| **Locality** | **Yes** | Nearby particles interact strongly; distant ones weakly |
+| **Redundancy** | Yes | Far-field forces can be approximated |
+| **Symmetry** | Yes | Newton's third law: F(i→j) = -F(j→i) |
+
+Five out of six properties apply! This is a property-rich problem.
+
+### The Key Insight: Separability + Locality
+
+The gravitational potential from a distant cluster of particles can be approximated by a **multipole expansion** — a low-rank approximation (separability!) that's accurate when the cluster is far away (locality!).
+
+```
+Close particles (distance < threshold):
+  Compute exact O(1) interaction per pair
+
+Distant cluster of M particles:
+  Approximate entire cluster as one "super-particle"
+  (multipole expansion: monopole + dipole + quadrupole + ...)
+  Cost: O(p) per interaction instead of O(M), where p = expansion order
+```
+
+This is the **Barnes-Hut** algorithm (using a tree) or the **Fast Multipole Method** (FMM) using a more sophisticated hierarchy:
+
+```python
+def nbody_fast(positions, masses, theta=0.5):
+    """O(N log N) via Barnes-Hut tree."""
+    # 1. Build spatial tree (octree in 3D)
+    tree = build_octree(positions, masses)  # O(N log N)
+
+    # 2. For each particle, walk the tree
+    forces = np.zeros_like(positions)
+    for i in range(len(positions)):
+        forces[i] = tree_force(tree, positions[i], theta)
+
+    return forces
+
+def tree_force(node, pos, theta):
+    """Compute force from tree node on particle at pos."""
+    r = node.center_of_mass - pos
+    dist = np.linalg.norm(r)
+
+    if node.is_leaf or (node.size / dist < theta):
+        # FAR ENOUGH: use multipole approximation (separability!)
+        return node.total_mass * r / (dist**3 + 1e-10)
+    else:
+        # TOO CLOSE: recurse into children (locality!)
+        return sum(tree_force(child, pos, theta) for child in node.children)
+```
+
+**Complexity**: O(N log N) — from O(N²). For N=1M, that's 20M operations instead of 10¹² — a **50,000× speedup**.
+
+### What the Framework Revealed
+
+This problem uses *four* properties simultaneously:
+
+- **Separability** (Tier 1): Far-field interactions are low-rank → multipole expansion
+- **Locality** (Tier 2): Near-field needs exact computation, far-field allows approximation → tree structure
+- **Symmetry** (Tier 2): Newton's third law halves the work → F(i→j) = -F(j→i)
+- **Associativity** (Tier 1): Force summation can be parallelized across tree branches
+
+The FMM is regularly cited as one of the most important algorithms of the 20th century. It wasn't discovered by trying tricks — it was discovered by recognizing that gravitational interaction has **separable structure** at long range. The same property that enables LoRA (low-rank weight updates) enables the Fast Multipole Method (low-rank force approximation). The algebra is the same; the domain is different.
+
+::: {.callout-tip}
+## The Framework's Power: Cross-Domain Transfer
+
+This is what the book's thesis predicts: if you understand the *property*, you can transfer the *technique* across domains. A researcher who understands separability in the context of LoRA has the conceptual tools to understand FMM — and vice versa.
+:::
+
+---
+
 ## The Methodology in Review
 
-Let's trace what we did:
+Let's trace what we did across all three problems:
 
-| Step | Action | Properties Used |
-|------|--------|-----------------|
-| 1 | Profile baseline | - |
-| 2 | Identify bottleneck: sequential loop | - |
-| 3 | Check associativity: recurrence is associative | Associativity |
-| 4 | Apply parallel scan | Associativity |
-| 5 | Tile for memory | Locality |
-| 6 | Fuse operations | Locality |
-| 7 | Measure improvement | - |
-| 8 | Iterate | - |
+| Problem | Bottleneck | Key Property | Technique | Speedup |
+|---------|------------|-------------|-----------|---------|
+| Mamba scan | Sequential loop | Associativity | Parallel scan | ~15× |
+| Streaming top-K | O(n log n) sort | Associativity + Redundancy | Streaming heap + parallel merge | ~3-10× |
+| N-body | O(N²) all-pairs | Separability + Locality | Multipole expansion / tree | ~50,000× |
 
-The framework guided us:
-- We checked each property systematically
-- Associativity was the key enabler
-- Locality improved constant factors
-- The other properties didn't apply to this specific problem
+The framework guided us differently for each problem:
+
+- **Mamba**: Associativity was the single key enabler; other properties improved constants
+- **Top-K**: Associativity enabled parallelism; redundancy enabled streaming (don't store everything)
+- **N-body**: The richest case — separability, locality, symmetry, and associativity all contributed, with separability providing the algorithmic breakthrough
 
 ## Generalizing the Approach
 
@@ -641,6 +821,12 @@ Always verify speedup with wall-clock time, not just FLOPS or theoretical analys
 
 ---
 
-This capstone demonstrates that the framework isn't just theoretical—it's a practical methodology for deriving optimizations. The properties are your vocabulary; the methodology is your grammar.
+## The Lesson
+
+Three problems. Three domains. The same six-property framework identified the key optimization in each case.
+
+This isn't coincidence — it's the book's thesis in action. **Mathematical properties are universal.** Associativity enables parallel scan in ML recurrences *and* streaming aggregation in analytics. Separability enables LoRA in fine-tuning *and* multipole expansion in physics. The algebra doesn't know what domain it's in.
+
+The framework isn't just theoretical — it's a practical methodology for deriving optimizations. The properties are your vocabulary; the methodology is your grammar.
 
 Now go optimize something.
