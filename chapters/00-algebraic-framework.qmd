@@ -24,17 +24,19 @@ The [previous chapter](00a-thinking-in-arrays.qmd) provided the **mental model**
 
 This book makes a bold claim:
 
-> **Every significant performance optimization can be traced to a mathematical property of the computation.**
+> **Every significant algorithmic optimization can be traced to a mathematical property of the computation.**
 
-Not "some optimizations." Not "many optimizations." *Every* significant one.
+Not "some optimizations." Not "many optimizations." *Every* significant algorithmic one.
 
 This isn't mysticism—it's recognition that algorithms operate on mathematical structures, and those structures have properties that either enable or preclude certain transformations.
+
+(Note: low-level optimizations like SIMD instruction selection, register allocation, and branch prediction operate at the *execution model* level rather than the *mathematical structure* level. This framework addresses the higher-level question: why is a fundamentally different algorithm possible?)
 
 ## The Optimization Equation
 
 Performance optimization solves a fundamental equation:
 
-$$\text{Same Result} + \text{Fewer Resources} = \text{Optimization}$$
+An optimization is a transformation that **preserves the result** while **using fewer resources**.
 
 The challenge: How do we know a transformation preserves the result?
 
@@ -44,7 +46,13 @@ When we know a computation has a particular property, we know certain transforma
 
 ## The Six Fundamental Properties
 
-Through extensive study of performance optimizations across domains, six properties emerge as fundamental:
+Through extensive study of performance optimizations across domains, six properties emerge as fundamental.
+
+::: {.callout-note}
+## A Note on Reversibility
+
+Part II also covers **reversibility** (invertibility of computations), which enables memory-efficient training by recomputing rather than storing activations. While not one of the six "structural" properties that determine *what work to do*, reversibility determines *what to remember*—a complementary optimization axis. It appears in Part II as a bonus chapter after the core six.
+:::
 
 ```
 THE PERIODIC TABLE OF OPTIMIZATION
