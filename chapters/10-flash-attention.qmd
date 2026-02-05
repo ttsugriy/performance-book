@@ -1034,6 +1034,19 @@ The best systems offer both: portable default, hardware-specific fast paths.
 
 **Chapter 4 (Associativity)**: The (max, sum, output) state forms a monoid—the mathematical foundation for chunking.
 
+## Property Audit
+
+| Property | Applies? | How it's exploited |
+|----------|----------|-------------------|
+| **Associativity** | **Primary** | Online softmax: the (max, sum, weighted_sum) state has an associative combine operation, enabling chunked computation |
+| **Separability** | No | Attention is fundamentally a full interaction (each query attends to all keys) |
+| **Locality** | **Primary** | Tiling Q/K/V into SRAM-sized blocks eliminates O(n²) HBM traffic |
+| **Sparsity** | No | Standard FlashAttention computes exact (dense) attention |
+| **Redundancy** | No | Exact computation, no approximation |
+| **Symmetry** | No | Attention is asymmetric (Q→K, not K→Q) |
+
+**Dominant properties**: Associativity (enables the algorithm) + Locality (enables the speedup). This is the canonical example of Tier 1 + Tier 2 cooperation.
+
 ## Key Takeaways
 
 1. **The question matters**: "Must we materialize the n×n matrix?" led to the algorithm. Without the question, you'd never find the answer.

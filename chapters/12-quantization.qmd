@@ -503,6 +503,19 @@ How would you discover modern quantization if it didn't exist?
 
 The theme: understand the failure mode (outliers), then design around it.
 
+## Property Audit
+
+| Property | Applies? | How it's exploited |
+|----------|----------|-------------------|
+| **Associativity** | No | Quantization doesn't change computation order |
+| **Separability** | Partial | Per-channel quantization decomposes the problem per output channel |
+| **Locality** | Partial | Smaller datatypes improve cache efficiency |
+| **Sparsity** | Partial | Mixed-precision keeps outliers in FP16 (sparse set of channels) |
+| **Redundancy** | **Primary** | Neural network weights contain far less information than 32-bit encoding — the gap between information content and representation size is what quantization exploits |
+| **Symmetry** | No | No symmetry structure involved |
+
+**Dominant property**: Redundancy — quantization works because networks are overparameterized and their weight distributions have low effective entropy.
+
 ## Key Takeaways
 
 1. **Neural networks are robust to quantization**: Training noise, flat minima, and overparameterization create tolerance

@@ -564,6 +564,19 @@ How would you discover LoRA if it didn't exist?
 
 6. **Validate empirically**: Compare across tasks, ranks, model sizes. Find that it works remarkably well.
 
+## Property Audit
+
+| Property | Applies? | How it's exploited |
+|----------|----------|-------------------|
+| **Associativity** | No | No chunking or parallel reduction involved |
+| **Separability** | **Primary** | $\Delta W = BA$ — the weight update is factored into low-rank components |
+| **Locality** | No | LoRA doesn't change memory access patterns |
+| **Sparsity** | No | The adapters are dense (though sparse LoRA variants exist) |
+| **Redundancy** | **Secondary** | Fine-tuning updates contain less information than their FP32 encoding suggests — the low-rank structure IS the redundancy |
+| **Symmetry** | No | No symmetry structure exploited |
+
+**Dominant property**: Separability — LoRA is a direct application of low-rank matrix factorization to weight updates.
+
 ## Key Takeaways
 
 1. **Fine-tuning is low-rank**: The weight updates during fine-tuning live in a low-dimensional subspace. This is empirically verifiable.

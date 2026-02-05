@@ -729,6 +729,19 @@ This is matmul-shaped hardware.
 
 The algorithm (tiled GEMM) and the hardware (tensor cores, shared memory hierarchy) evolved together.
 
+## Property Audit
+
+| Property | Applies? | How it's exploited |
+|----------|----------|-------------------|
+| **Associativity** | **Yes** | Matmul can be decomposed into independent sub-problems (tiles) and recombined — the result is the same regardless of computation order |
+| **Separability** | Partial | Each output element is an inner product (separable across the K dimension). Strassen-type algorithms exploit deeper factorizations |
+| **Locality** | **Primary** | Tiling keeps working sets in cache/SRAM. The 200× speedup is almost entirely from improving data locality |
+| **Sparsity** | No | Dense matmul — no zeros to skip |
+| **Redundancy** | Partial | FP16/INT8 tensor cores exploit that full FP32 precision is often unnecessary |
+| **Symmetry** | No | General matrices have no symmetry to exploit (symmetric/Hermitian matrices do) |
+
+**Dominant property**: Locality — the entire optimization journey from naive to cuBLAS is about keeping data in fast memory.
+
 ## Key Takeaways
 
 1. **200× speedup is possible**: From naive loops to optimized BLAS/cuBLAS, the same algorithm runs 200× faster. All from exploiting memory hierarchy.

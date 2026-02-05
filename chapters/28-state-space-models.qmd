@@ -558,6 +558,19 @@ class MambaCache:
         return self.states[layer_idx]
 ```
 
+## Property Audit
+
+| Property | Applies? | How it's exploited |
+|----------|----------|-------------------|
+| **Associativity** | **Primary** | The linear recurrence $(A_t, b_t) \oplus (A_{t+1}, b_{t+1}) = (A_{t+1} A_t, A_{t+1} b_t + b_{t+1})$ is associative, enabling parallel scan |
+| **Separability** | **Secondary** | The SSM kernel (convolution view) factors time and state dimensions; low state dimension d_state is a separability choice |
+| **Locality** | Yes | Chunked scan keeps working state in SRAM |
+| **Sparsity** | No | Dense state transitions |
+| **Redundancy** | Partial | State caching during generation (analogous to KV cache) |
+| **Symmetry** | No | Mamba's selective mechanism breaks time-invariance |
+
+**Dominant property**: Associativity — the parallel scan transforms O(N) sequential steps into O(log N) parallel steps, which is the fundamental algorithmic advance.
+
 ## Key Takeaways
 
 1. **SSMs are O(n)**: Linear complexity via state-space formulation.
