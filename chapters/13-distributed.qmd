@@ -306,9 +306,10 @@ Strategy:
 
 Per-GPU memory:
 - Model: 175B / (8 × 8) = 2.7B params × 2 bytes = 5.4GB
-- Optimizer (ADAM): 5.4GB × 3 = 16.2GB
+- Optimizer (AdamW): 2.7B params × 12 bytes = 32.4GB
+  (FP32 master weights: 10.8GB + momentum: 10.8GB + variance: 10.8GB)
 - Activations: ~40GB (depends on microbatch size)
-- Total: ~62GB (fits in 80GB)
+- Total: ~78GB (tight fit in 80GB, requires activation checkpointing)
 ```
 
 ## Communication Primitives
@@ -326,7 +327,7 @@ GPU 2: [g, h, i]                       GPU 1: [a+d, b+e, c+f]
 
 Used for: Gradient synchronization in data parallelism
 
-**Time complexity**: O(N × data_size / bandwidth) with ring algorithm
+**Time complexity**: O(data_size / bandwidth) with ring algorithm — the key insight of ring all-reduce is that the cost is independent of N (each GPU sends and receives 2(N-1)/N of the data, which approaches 2× data_size as N grows)
 
 ### All-Gather
 
