@@ -77,6 +77,8 @@ The lineage continues:
 APL (1962) → J/K → MATLAB → NumPy → PyTorch/JAX
 ```
 
+(This is a simplification—MATLAB was also influenced by Fortran's array operations and BLAS, and NumPy draws from multiple traditions. But APL, and particularly Iverson's insight that notation shapes thought [@iverson1979notation], is the key intellectual ancestor.)
+
 Modern deep learning frameworks are array languages. When you write PyTorch or JAX, you're writing in the APL tradition—whether you know it or not.
 
 ## From Loops to Operations

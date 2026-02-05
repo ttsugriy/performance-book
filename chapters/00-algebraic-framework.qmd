@@ -104,7 +104,7 @@ THE PERIODIC TABLE OF OPTIMIZATION
 - **Parallelization:** Different processors handle different groups, merge at end
 - **Pipelining:** Start on next chunk before finishing current
 
-**The FlashAttention insight:**
+**The FlashAttention insight** [@dao2022flashattention]:
 
 Standard softmax appears non-associative:
 $$\text{softmax}(x)_i = \frac{e^{x_i}}{\sum_j e^{x_j}}$$
@@ -138,7 +138,7 @@ A matrix is separable (rank-1) if $A = uv^T$. More generally, low-rank if $A = U
 - **Decomposition:** Split complex operations into simpler ones
 - **Independence:** Compute factors in parallel
 
-**The LoRA insight:**
+**The LoRA insight** [@hu2021lora]:
 
 Fine-tuning updates the weight matrix: $W' = W + \Delta W$.
 
@@ -360,7 +360,7 @@ This abstraction is precisely what makes our framework powerful. When we say "Fl
 
 ### Stepanov's Legacy
 
-Alexander Stepanov, architect of the C++ Standard Template Library, crystallized this in code. His book "From Mathematics to Generic Programming" traces how **the same algorithm applies to any type with the right properties**.
+Alexander Stepanov, architect of the C++ Standard Template Library, crystallized this in code. His book *From Mathematics to Generic Programming* [@stepanov2014fm2gp] traces how **the same algorithm applies to any type with the right properties**.
 
 ```cpp
 // Stepanov's insight: power() works for ANY associative operation
