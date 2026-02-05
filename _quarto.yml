@@ -71,6 +71,7 @@ book:
         - chapters/20-compiler-opts.qmd
         - chapters/22-numerical-precision.qmd
         - chapters/23-production-cases.qmd
+        - chapters/common-mistakes.qmd
         - chapters/glossary.qmd
 
 format:

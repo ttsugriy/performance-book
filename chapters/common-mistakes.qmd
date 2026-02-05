@@ -1,0 +1,98 @@
+---
+title: "Common Mistakes Reference"
+subtitle: "A Field Guide to Performance Pitfalls"
+id: sec-common-mistakes
+---
+
+# Common Mistakes Reference {.unnumbered}
+
+This appendix collects the "when X breaks" patterns from throughout the book into a single searchable reference. When performance disappoints, check these first.
+
+---
+
+## Measurement Mistakes
+
+**Missing GPU synchronization**: Timing GPU operations without `torch.cuda.synchronize()` measures kernel *launch* time (~microseconds), not *execution* time (milliseconds). Always synchronize before starting and stopping the timer. See @sec-interlude-measurement.
+
+**Reporting means instead of medians**: Performance distributions are right-skewed (occasional spikes from GC, thermal throttling). Means are inflated by outliers. Report medians and P95/P99 percentiles.
+
+**Benchmarking without warmup**: The first few iterations include JIT compilation (`torch.compile`), CUDA context initialization, and cache warming. Discard at least 3-5 warmup iterations.
+
+**Optimizing the wrong thing**: The most common mistake. Profile first to find the actual bottleneck. A 10× speedup on a function that's 1% of runtime gives a 0.1× total improvement.
+
+---
+
+## Memory Mistakes
+
+**In-place operations during training**: `x.add_(1)` and `x.mul_(2)` modify tensors in-place, which can corrupt autograd's gradient graph. Only use in-place operations during inference or in `torch.no_grad()` contexts.
+
+**KV cache calculated without GQA**: LLaMA-2 and most modern models use Grouped-Query Attention, which reduces KV cache by the number of head groups. Calculating with full MHA heads can overestimate memory by 4-8×. See @sec-inference.
+
+**Fragmentation disguised as OOM**: `torch.cuda.memory_allocated()` shows 50% usage, but allocation fails. This is fragmentation — free memory exists but isn't contiguous. Try `torch.cuda.empty_cache()` or reduce allocation variance. See @sec-gpu-memory.
+
+**Forgetting optimizer state memory**: Adam stores momentum and variance in FP32, requiring 12 bytes per parameter (4 bytes each for master weights, momentum, variance). For a 7B model, optimizer state alone is ~84 GB.
+
+---
+
+## Parallelism Mistakes
+
+**Python GIL for CPU-bound threads**: `ThreadPoolExecutor` with CPU-bound Python code achieves zero parallel speedup due to the GIL. Use `ProcessPoolExecutor` or NumPy/PyTorch operations that release the GIL. See @sec-parallelism.
+
+**Assuming linear speedup**: Amdahl's Law gives the optimistic bound. Real overhead (communication, synchronization, bandwidth saturation) means actual speedup is always less. For memory-bound workloads, bandwidth saturates at 4-16 threads.
+
+**Ring all-reduce scaling confusion**: Ring all-reduce cost is O(data_size / bandwidth), independent of GPU count N. The common mistake is assuming O(N × data_size). See @sec-distributed.
+
+---
+
+## Numerical Mistakes
+
+**Floating-point non-associativity**: `(a + b) + c != a + (b + c)` in IEEE 754. Parallel reduction reorders additions, producing different (but equally valid) results. This causes non-determinism across runs and hardware. See @sec-numerical-precision.
+
+**Ignoring TF32 on Ampere+**: PyTorch uses TF32 tensor cores by default on A100/H100 for FP32 matmuls. This silently reduces precision to ~3 decimal digits. Control with `torch.set_float32_matmul_precision('highest')` if full FP32 precision is needed.
+
+**Quantization without outlier handling**: Uniform INT4/INT8 quantization fails on LLMs due to emergent features — activations 100× larger than typical values. Use per-channel quantization, mixed precision (GPTQ, AWQ), or SmoothQuant. See @sec-quantization.
+
+---
+
+## torch.compile Mistakes
+
+**Graph breaks from Python side effects**: `print()`, `logging`, and `breakpoint()` inside compiled functions cause graph breaks that prevent optimization. Remove them or guard with `if not torch.compiler.is_compiling():`.
+
+**Saving compiled models with torch.save**: `model.state_dict()` saves only weights, not the compiled graph. Use `torch._inductor.config.fx_graph_cache = True` for persistent caching or `torch.export()` for deployment. See @sec-torch-compile.
+
+**Variable shapes causing recompilation**: Each new input shape triggers recompilation. Use `torch.compile(dynamic=True)` or pad inputs to consistent sizes.
+
+---
+
+## Algorithm-Specific Mistakes
+
+**FlashAttention memory isn't O(n)**: FlashAttention's HBM access is O(n²d²/M), not O(nd). K and V are loaded once per Q-tile. The memory *output* is O(n), but the IO traffic depends on SRAM size M. See @sec-flash-attention.
+
+**LoRA rank too low for hard tasks**: Rank 8 captures 98% of performance for near-distribution tasks. For distant tasks (new languages, mathematical reasoning), much higher ranks (32-64) or full fine-tuning may be needed. See @sec-lora.
+
+**MoE load imbalance**: Without auxiliary loss terms, MoE routing collapses — all tokens route to the same expert. Always include a load-balancing loss. See @sec-moe.
+
+---
+
+## Systems Mistakes
+
+**Ignoring queueing effects**: At 75% utilization, P99 latency explodes (Kingman's formula). Plan for headroom — production systems should target 50-70% steady-state utilization. See @sec-queueing.
+
+**Data loading as hidden bottleneck**: CPU data loading (tokenization, augmentation, disk I/O) often limits GPU throughput. Profile data loading separately with `DataLoader(num_workers=N, pin_memory=True)`. See @sec-production-cases.
+
+**Network assumptions for distributed training**: TCP congestion control assumes competitive flows, but training flows are cooperative. Standard protocols cause collisions at synchronization points. Training-aware congestion control (MLTCP) can give 2-4× communication speedup. See @sec-distributed.
+
+---
+
+::: {.callout-tip}
+## Using This Reference
+
+When performance disappoints:
+
+1. **Check measurement first**: Are you measuring correctly? (Top section)
+2. **Check memory**: Is OOM or fragmentation the real issue?
+3. **Match the symptom** to the sections above
+4. **Return to the relevant chapter** for the full explanation
+
+This appendix is intentionally terse — it's a checklist, not a tutorial. Each entry references the chapter with the full treatment.
+:::
