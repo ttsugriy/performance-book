@@ -10,6 +10,14 @@ Training is batch-oriented: process thousands of examples together. Inference is
 The optimizations are completely different.
 :::
 
+::: {.callout-note}
+## Property Spotlight: Redundancy + Locality
+
+KV caching exploits the fact that recomputing K/V for past tokens produces **identical results**—the computation is redundant. By caching these values (a locality optimization—keep frequently accessed data in fast memory), we eliminate O(n) redundant recomputations per generated token.
+
+Multi-Query Attention exploits **redundancy** across attention heads: different query heads can share the same K/V representations with minimal quality loss.
+:::
+
 ## The Inference Workload
 
 Training: maximize throughput (samples/second)

@@ -10,6 +10,12 @@ Your median latency is fine. Your P99 is terrible.
 Utilization went from 60% to 75%, and suddenly the queue never empties. What happened?
 ::::
 
+::: {.callout-note}
+## Property Spotlight: Associativity
+
+Little's Law ($L = \lambda W$) holds under remarkably general conditions because arrival and departure processes satisfy an **associative** counting property: total arrivals = sum of arrivals in any partition of time. This is why Little's Law works regardless of arrival distribution, service distribution, or scheduling discipline—the associativity of counting is all that's needed.
+:::
+
 ![](../assets/queueing/queueing-theory.png){fig-cap="Queueing theory: smooth flow turns into a latency cliff near saturation."}
 
 ## The Simplest Model

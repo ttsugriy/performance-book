@@ -12,6 +12,12 @@ Serving LLMs at scale is a systems engineering challenge. Latency SLAs, cost eff
 This chapter covers the techniques that power production inference at companies serving billions of requests.
 :::
 
+::: {.callout-note}
+## Property Spotlight: Redundancy + Sparsity
+
+Prefix caching / RadixAttention exploits **redundancy**: many requests share common prefixes whose KV cache entries are identical. Speculative decoding exploits **sparsity** in the draft-target disagreement: most draft tokens are accepted, so verification is sparse. Disaggregated serving exploits **separability**: prefill and decode have different resource profiles and can be factored onto different hardware.
+:::
+
 ## Beyond Basic Inference
 
 Chapter 14 covered fundamentals: KV caching, continuous batching, speculative decoding. This chapter goes deeper into production-grade techniques.

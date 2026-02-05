@@ -12,6 +12,12 @@ id: sec-gpu-memory
 Understanding how GPU memory actually works—not just how much you have—is the difference between running your model and staring at error messages.
 :::
 
+::: {.callout-note}
+## Property Spotlight: Redundancy + Reversibility
+
+GPU memory optimization exploits **redundancy** (activation checkpointing discards activations that can be recomputed) and **reversibility** (reversible layers enable recomputation from outputs). Memory-efficient attention (FlashAttention) exploits **locality** by keeping working data in SRAM rather than materializing O(n²) attention matrices in HBM.
+:::
+
 ## The Memory Landscape
 
 A typical training run uses GPU memory for:
