@@ -147,106 +147,31 @@ The compiler traces execution, builds a graph, and generates fused kernels.
 **Pros**: Works with arbitrary code, finds fusion opportunities automatically.
 **Cons**: Compilation overhead, potential for unexpected behavior.
 
-## torch.compile Deep Dive
+## Automatic Fusion with torch.compile
 
-PyTorch 2.0 introduced `torch.compile`, a JIT compiler that automatically applies fusion and other optimizations.
-
-### How It Works
+PyTorch 2.0 introduced `torch.compile`, which automatically identifies and applies fusion opportunities:
 
 ```python
 @torch.compile
 def my_function(x, y):
-    z = x + y
-    return torch.relu(z)
+    z = x + y          # These element-wise ops
+    z = torch.relu(z)  # get fused into a single kernel
+    return z
 ```
 
-1. **Tracing**: TorchDynamo captures the Python bytecode and extracts a computation graph
-2. **Graph capture**: Operations are recorded into an FX graph
-3. **Optimization**: TorchInductor applies fusion and generates Triton kernels
-4. **Code generation**: Optimized kernels are compiled and cached
+`torch.compile` uses TorchDynamo to trace Python bytecode into a graph, then TorchInductor generates fused Triton kernels. It typically fuses element-wise chains, normalization layers, and pointwise ops following matmul—but leaves large matrix multiplies to cuBLAS.
 
-### Fusion in Action
-
-```python
-import torch
-
-def unfused(x):
-    x = x + 1
-    x = x * 2
-    x = torch.relu(x)
-    return x
-
-fused = torch.compile(unfused)
-
-x = torch.randn(10000, device='cuda')
-
-# First call: compilation happens
-y = fused(x)
-
-# Subsequent calls: use cached fused kernel
-y = fused(x)  # Fast
-```
-
-### What Gets Fused?
-
-torch.compile typically fuses:
-
-- Chains of element-wise operations
-- Normalization layers (LayerNorm, BatchNorm, RMSNorm)
-- Softmax and cross-entropy
-- Pointwise operations following matmul (bias + activation)
-
-### What Doesn't Fuse?
-
-- Large matrix multiplies (already efficient, use cuBLAS/cuDNN)
-- Operations with data-dependent control flow
-- Custom CUDA extensions (unless wrapped appropriately)
+For a comprehensive treatment of `torch.compile`—including graph breaks, compilation modes, dynamic shapes, and integration patterns—see the [torch.compile Deep Dive](29-torch-compile.qmd).
 
 ## The Limits of Fusion
 
 Fusion isn't always beneficial.
 
-### Memory Limits
+**Register pressure**: Each additional operation in a fused kernel requires registers. Very long fusion chains may spill to local memory, negating benefits.
 
-Fused kernels need registers and shared memory for intermediates. Very long fusion chains may spill to local memory, negating benefits.
+**Compilation overhead**: `torch.compile` has upfront cost (100ms to several seconds for first call). For short-running or highly dynamic code, this may not pay off.
 
-### Register Pressure
-
-Each additional operation in a fused kernel requires registers. At some point, the GPU runs out:
-
-```python
-# This might not fuse well due to register pressure
-def many_ops(x):
-    for i in range(20):
-        x = x * 2 + 1
-        x = torch.sin(x) + torch.cos(x)
-    return x
-```
-
-### Compilation Overhead
-
-torch.compile has upfront cost:
-
-- First call: 100ms to several seconds
-- Cached calls: near-zero overhead
-
-For short-running programs or highly dynamic code, compilation may not pay off.
-
-### Dynamic Shapes
-
-Varying tensor shapes can trigger recompilation:
-
-```python
-@torch.compile
-def process(x):
-    return x.sum(dim=-1)
-
-# Each new shape may trigger recompilation
-process(torch.randn(100, 50, device='cuda'))
-process(torch.randn(200, 100, device='cuda'))  # Recompile?
-```
-
-Use `dynamic=True` or padding to mitigate.
+**Dynamic shapes**: Varying tensor shapes can trigger recompilation. Use `torch.compile(dynamic=True)` or padding to mitigate.
 
 ## Fusion and the Memory Hierarchy
 
