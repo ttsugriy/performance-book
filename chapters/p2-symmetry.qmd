@@ -357,6 +357,78 @@ The right choice depends on whether the symmetry actually holds for your problem
 5. **Design choice**: Match the symmetry group of your problem. Too much symmetry loses expressiveness; too little wastes parameters.
 :::
 
+## The Hardware Connection
+
+Symmetry optimizations interact with hardware in specific ways:
+
+**Parameter reduction** → Memory savings: A CNN with 3×3 kernels uses 9× fewer parameters than an equivalent fully-connected layer per spatial position. This means 9× less memory bandwidth to load weights, critical for memory-bound inference.
+
+**Fourier convolution** → Compute savings: FFT-based convolution runs in O(n log n) vs O(n²) for large kernels. On GPUs, cuFFT is highly optimized and the crossover point for when FFT convolution is faster than direct convolution is typically around kernel size 11-15.
+
+**Weight sharing** → Cache efficiency: Shared weights are loaded once and reused across spatial positions. This dramatically improves cache hit rates compared to unique weights per position.
+
+```
+The Connection:
+
+Mathematical Property     Hardware Constraint       Exploitation
+───────────────────────────────────────────────────────────────
+Translation symmetry  ×   Memory bandwidth     →   Weight sharing (CNN)
+Circulant structure   ×   FFT hardware         →   Fourier convolution
+Rotation equivariance ×   Parameter count      →   G-CNNs
+```
+
+## Exercises
+
+::: {.callout-tip collapse="true"}
+### Exercise 1: Parameter Savings from Symmetry
+
+A fully-connected layer maps a 32×32 image (1024 pixels) to a 1024-dimensional output.
+
+(a) How many parameters does the FC layer have?
+(b) A CNN with 32 3×3 filters on the same input has how many parameters?
+(c) What is the compression ratio? What symmetry assumption enables this?
+
+**Solution**: (a) 1024 × 1024 = 1,048,576 parameters. (b) 32 × (3 × 3 × 1) + 32 biases = 320 parameters. (c) ~3,278× compression. This is enabled by translation symmetry — the assumption that the same pattern detector is useful at every spatial position.
+:::
+
+::: {.callout-tip collapse="true"}
+### Exercise 2: When Symmetry Breaks
+
+Give an example where translation symmetry does **not** hold for images. What happens to CNN performance in this case?
+
+**Solution**: Object detection at image boundaries — features near edges are systematically different from center features (they have less context). Handwriting recognition where character position matters (e.g., subscripts vs. superscripts). In these cases, CNNs may underperform position-aware architectures, or need positional encoding to break the symmetry.
+:::
+
+::: {.callout-tip collapse="true"}
+### Exercise 3: FFT Convolution Crossover
+
+Direct convolution of a signal of length $n$ with a kernel of size $k$ costs $O(nk)$ operations. FFT convolution costs $O(n \log n)$ (independent of $k$).
+
+(a) At what kernel size $k$ does FFT convolution become cheaper?
+(b) For $n = 1024$, what is the crossover $k$?
+(c) Why isn't FFT convolution always used for 3×3 kernels in deep learning?
+
+**Solution**: (a) When $nk > n \log n$, i.e., $k > \log n$. (b) $\log_2(1024) = 10$, so $k > 10$. (c) For small kernels (3×3), direct convolution is faster due to lower constant factors, better cache behavior, and optimized cuDNN implementations. FFT has overhead from the forward/inverse transforms and requires complex arithmetic.
+:::
+
+## Further Reading
+
+- Cohen & Welling (2016). "Group Equivariant Convolutional Networks"
+- Bronstein et al. (2021). "Geometric Deep Learning: Grids, Groups, Graphs, Geodesics, and Gauges" — comprehensive treatment of symmetry in deep learning
+- Noether, E. (1918). "Invariante Variationsprobleme" — the original symmetry-conservation connection
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook walks through:
+
+- Comparing CNN vs. FC parameter counts and performance
+- Implementing FFT convolution and measuring the crossover point
+- Visualizing learned CNN filters to see translation symmetry in action
+
+<!-- Notebook coming soon -->
+:::
+
 ---
 
 [**Part III: Algorithm Investigations →**](09-matrix-multiply.qmd)

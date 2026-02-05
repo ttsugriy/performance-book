@@ -375,6 +375,81 @@ def find_optimal_quantization(model, eval_dataset, quality_threshold=0.95):
 5. **The tradeoff is measurable**: Quantify quality vs. compression and find the sweet spot.
 :::
 
+## The Hardware Connection
+
+Redundancy's value depends on hardware characteristics:
+
+**Memory bandwidth** (Chapter 2): Quantization from FP16 to INT4 reduces memory traffic by 4×. For memory-bound operations (most LLM inference), this translates directly to 4× throughput improvement.
+
+**Integer tensor cores**: Modern GPUs have specialized INT8/INT4 hardware that is 2-4× faster than FP16 tensor cores. Quantization unlocks these.
+
+**Cache hierarchy** (Chapter 1): KV cache fits in GPU SRAM for shorter sequences, enabling fast access. When the cache spills to HBM, latency increases—making cache size reduction via quantization or MQA critical.
+
+```
+The Connection:
+
+Mathematical Property     Hardware Constraint       Exploitation
+───────────────────────────────────────────────────────────────
+Information < Bits    ×   Memory bandwidth     →   Quantization
+Repeated computation  ×   HBM latency          →   KV caching
+Approximate suffices  ×   Precision hierarchy   →   Mixed precision
+```
+
+## Exercises
+
+::: {.callout-tip collapse="true"}
+### Exercise 1: Information Content of Weights
+
+A neural network layer has weight matrix $W \in \mathbb{R}^{4096 \times 4096}$ stored in FP32 (4 bytes per element).
+
+(a) What is the total storage in bytes?
+(b) If SVD reveals that 99% of the variance is captured by the top 256 singular values, what is the "effective" information content using the low-rank representation?
+(c) What compression ratio does this imply?
+
+**Solution**: (a) 4096 × 4096 × 4 = 67 MB. (b) Low-rank: (4096 × 256 + 256 + 256 × 4096) × 4 ≈ 8.4 MB. (c) ~8× compression. In practice, quantization achieves similar ratios through a different mechanism.
+:::
+
+::: {.callout-tip collapse="true"}
+### Exercise 2: KV Cache Memory Budget
+
+You're serving LLaMA-2 7B (32 layers, 32 heads, head_dim=128, FP16) with a 4096-token context window on a 24GB GPU. Model weights in INT4 use ~3.5GB.
+
+(a) How much KV cache does each concurrent request need?
+(b) How many concurrent requests can you serve?
+(c) If you quantize the KV cache to INT8, how does the answer change?
+
+**Solution**: (a) 2 × 32 × 4096 × (32 × 128) × 2 bytes = 2.1 GB per request. (b) Available: 24 - 3.5 - 2 (overhead) = 18.5 GB → ~8 concurrent requests. (c) INT8 KV cache: 1.05 GB per request → ~17 concurrent requests.
+:::
+
+::: {.callout-tip collapse="true"}
+### Exercise 3: When Redundancy Doesn't Help
+
+Give an example of a computation where the result contains as much information as the input (i.e., no redundancy to exploit). What does this imply about the possibility of compression?
+
+**Solution**: Encryption (e.g., AES): the ciphertext contains as much entropy as the input + key. Lossless compression cannot reduce it. Similarly, random data cannot be compressed. This is why quantization works for neural networks (structured, redundant weights) but wouldn't work for random matrices.
+:::
+
+## Further Reading
+
+- Shannon, C. E. (1948). "A Mathematical Theory of Communication"
+- Dettmers et al. (2022). "LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale"
+- Frantar et al. (2022). "GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers"
+- Lin et al. (2023). "AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration"
+- Cover & Thomas (2006). "Elements of Information Theory" (the textbook on information-theoretic limits)
+
+::: {.callout-note}
+## Try It Yourself
+
+The accompanying notebook walks through:
+
+- Computing weight entropy for real models
+- Implementing basic quantization and measuring quality impact
+- Analyzing KV cache memory requirements
+- Comparing compression ratios across techniques
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/13-quantization-investigation.ipynb)
+:::
+
 ---
 
 [**Next: Symmetry →**](p2-symmetry.qmd)
