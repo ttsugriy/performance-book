@@ -411,8 +411,10 @@ model(x)  # Very slow first call
 # 1. Use default mode for faster compile
 model = torch.compile(model)  # Faster compile, good performance
 
-# 2. Warm up once, save compiled model
-torch.save(model.state_dict(), "compiled_model.pt")
+# 2. Enable persistent cache to avoid recompilation across runs
+torch._inductor.config.fx_graph_cache = True
+# Note: torch.save(model.state_dict(), ...) only saves weights,
+# NOT the compiled graph. Use torch.export() for deployment.
 ```
 
 ### Diagnostic Tools
