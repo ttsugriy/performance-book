@@ -583,6 +583,42 @@ The accompanying notebook lets you:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/04-associativity-softmax.ipynb)
 :::
 
+## Exercises
+
+::: {.callout-tip collapse="true"}
+### Exercise 1: Is It Associative?
+
+For each operation below, determine whether it's associative. If yes, describe the monoid (set, operation, identity). If no, explain why.
+
+(a) Matrix multiplication
+(b) Maximum of a set
+(c) String concatenation
+(d) Subtraction
+(e) Harmonic mean
+
+**Solution**: (a) **Yes**. (matrices, ×, I). Note: associative but NOT commutative. (b) **Yes**. (numbers, max, -∞). (c) **Yes**. (strings, concat, ""). Also not commutative. (d) **No**. (5 - 3) - 1 = 1, but 5 - (3 - 1) = 3. (e) **No**. The harmonic mean of harmonic means is not the global harmonic mean.
+:::
+
+::: {.callout-tip collapse="true"}
+### Exercise 2: Design a Streaming Algorithm
+
+Design a streaming algorithm that computes the variance of a sequence in a single pass. What state do you need to maintain?
+
+**Solution**: Maintain (count, mean, M2) where M2 tracks the sum of squared deviations. Update rule (Welford's algorithm): n += 1; delta = x - mean; mean += delta/n; delta2 = x - mean; M2 += delta * delta2. Variance = M2/n. The combine operation for merging two partial states (n_a, mean_a, M2_a) and (n_b, mean_b, M2_b) is: n = n_a + n_b; delta = mean_b - mean_a; mean = (n_a × mean_a + n_b × mean_b) / n; M2 = M2_a + M2_b + delta² × n_a × n_b / n. This is associative, enabling parallel computation.
+:::
+
+::: {.callout-tip collapse="true"}
+### Exercise 3: Chunk Size Tradeoff
+
+In FlashAttention, the tile size (B_r, B_c) must fit in SRAM. For an A100 with 192 KB of shared memory per SM:
+
+(a) If d = 64 and we use FP16, what's the maximum tile size B_c for K and V tiles (each B_c × d)?
+(b) What happens to HBM traffic if you halve the tile size?
+(c) Why not just use the largest possible tile?
+
+**Solution**: (a) Two tiles (K, V): 2 × B_c × 64 × 2 bytes. Plus Q tile, accumulators, etc. Budget ~128 KB for K/V: B_c ≤ 128×1024 / (2×64×2) = 512. (b) Halving tile size doubles the number of tiles, so K/V are each read 2× more from HBM. HBM traffic roughly doubles. (c) Larger tiles reduce parallelism (fewer tiles to distribute across SMs) and may leave some SMs idle. There's an optimal balance between HBM traffic and SM occupancy.
+:::
+
 ## Further Reading
 
 - Milakov & Gimelshein (2018). "Online normalizer calculation for softmax" - The mathematical foundation

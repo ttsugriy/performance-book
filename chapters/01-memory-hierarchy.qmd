@@ -423,6 +423,36 @@ The notebook for this chapter lets you:
 
 ---
 
+## Exercises
+
+::: {.callout-tip collapse="true"}
+### Exercise 1: Predict the Ratio
+
+A matrix is stored in row-major order (C layout). You iterate over it in two ways:
+(a) Row-by-row: `for i in range(n): for j in range(n): access(M[i][j])`
+(b) Column-by-column: `for j in range(n): for i in range(n): access(M[i][j])`
+
+For `n = 4096` and `sizeof(element) = 4` bytes with 64-byte cache lines: How many cache lines does each access pattern touch? What speedup do you expect from (a) over (b)?
+
+**Solution**: Both touch 4096² = 16M elements. (a) accesses sequentially: each cache line (16 floats) is fully used, so 16M/16 = 1M cache line loads, each hitting cache after the first access. (b) accesses with stride 4096 × 4 = 16KB between consecutive accesses — each access likely misses cache. Expected ratio: 10-20× depending on cache size.
+:::
+
+::: {.callout-tip collapse="true"}
+### Exercise 2: Working Set Estimation
+
+Your model has batch_size=32, seq_len=2048, hidden_dim=4096, dtype=FP16. What is the working set for a single linear layer's forward pass (input + weight + output)?
+
+**Solution**: Input: 32 × 2048 × 4096 × 2 = 512 MB. Weight: 4096 × 4096 × 2 = 32 MB. Output: 32 × 2048 × 4096 × 2 = 512 MB. Total working set: ~1 GB. This vastly exceeds any cache level, so the operation is bandwidth-bound.
+:::
+
+::: {.callout-tip collapse="true"}
+### Exercise 3: Cache-Friendly Transpose
+
+You need to transpose a 4096×4096 float32 matrix. A naive approach reads column-by-column (poor locality). Propose a tiled approach and estimate its speedup.
+
+**Solution**: Tile the transpose into 64×64 blocks. Each block is 64×64×4 = 16 KB (fits in L1 cache). Process: load a 64×64 tile of the source into a local buffer (sequential reads within each row), transpose in the buffer, write the transposed tile to the output (sequential writes within each row). Both reads and writes are mostly sequential within tiles. Expected speedup: 5-15× over naive, depending on hardware.
+:::
+
 ## Further Reading
 
 - Patterson & Hennessy, *Computer Architecture: A Quantitative Approach* — The definitive reference on memory hierarchies
