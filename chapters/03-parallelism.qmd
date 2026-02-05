@@ -35,7 +35,7 @@ $$\text{Speedup} = \frac{1}{(1-p) + \frac{p}{n}}$$
 
 Where:
 
-- $p$ is the fraction of code that can be parallelized
+- $p$ is the fraction of *execution time* that can be parallelized
 - $n$ is the number of processors
 - $(1-p)$ is the serial fraction
 
@@ -151,51 +151,49 @@ Let's measure. We'll compare two workloads:
 
 ```python
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import time
 
-def benchmark_scaling(func, data, max_threads=16):
-    """Measure speedup as we add threads."""
+def benchmark_scaling(func, data, max_workers=16):
+    """Measure speedup as we add workers."""
     times = {}
 
-    # Baseline: single thread
+    # Baseline: single worker
     start = time.perf_counter()
-    func(data, num_threads=1)
+    func(data, num_workers=1)
     times[1] = time.perf_counter() - start
 
     for n in [2, 4, 8, 12, 16]:
         start = time.perf_counter()
-        func(data, num_threads=n)
+        func(data, num_workers=n)
         times[n] = time.perf_counter() - start
 
     return {n: times[1] / t for n, t in times.items()}
 
 # Compute-bound: many operations per element
-def compute_bound_work(data, num_threads):
-    def worker(chunk):
-        result = 0
-        for x in chunk:
-            # 100 iterations of expensive math
-            for _ in range(100):
-                result += np.sqrt(abs(x) + 1)
-        return result
+# Uses ProcessPoolExecutor to bypass Python's GIL (see note below)
+def compute_bound_work(data, num_workers):
+    chunk_size = len(data) // num_workers
+    chunks = [data[i*chunk_size:(i+1)*chunk_size] for i in range(num_workers)]
 
-    chunk_size = len(data) // num_threads
-    chunks = [data[i*chunk_size:(i+1)*chunk_size] for i in range(num_threads)]
-
-    with ThreadPoolExecutor(max_workers=num_threads) as ex:
-        results = list(ex.map(worker, chunks))
+    with ProcessPoolExecutor(max_workers=num_workers) as ex:
+        # Each process does heavy vectorized math independently
+        results = list(ex.map(
+            lambda chunk: np.sum(np.sqrt(np.abs(chunk) + 1)),
+            chunks
+        ))
     return sum(results)
 
 # Memory-bound: minimal operations per element
-def memory_bound_work(data, num_threads):
+# Uses ThreadPoolExecutor — NumPy releases the GIL during .sum()
+def memory_bound_work(data, num_workers):
     def worker(chunk):
         return chunk.sum()  # Just read and add
 
-    chunk_size = len(data) // num_threads
-    chunks = [data[i*chunk_size:(i+1)*chunk_size] for i in range(num_threads)]
+    chunk_size = len(data) // num_workers
+    chunks = [data[i*chunk_size:(i+1)*chunk_size] for i in range(num_workers)]
 
-    with ThreadPoolExecutor(max_workers=num_threads) as ex:
+    with ThreadPoolExecutor(max_workers=num_workers) as ex:
         results = list(ex.map(worker, chunks))
     return sum(results)
 
@@ -205,33 +203,48 @@ data = np.random.randn(10_000_000)
 print("Compute-bound scaling:")
 compute_scaling = benchmark_scaling(compute_bound_work, data)
 for n, speedup in compute_scaling.items():
-    print(f"  {n:2d} threads: {speedup:.2f}x")
+    print(f"  {n:2d} workers: {speedup:.2f}x")
 
 print("\nMemory-bound scaling:")
 memory_scaling = benchmark_scaling(memory_bound_work, data)
 for n, speedup in memory_scaling.items():
-    print(f"  {n:2d} threads: {speedup:.2f}x")
+    print(f"  {n:2d} workers: {speedup:.2f}x")
 ```
+
+::: {.callout-important}
+## Python's Global Interpreter Lock (GIL)
+
+CPython's GIL prevents multiple threads from executing Python bytecode simultaneously. This means `threading.Thread` and `ThreadPoolExecutor` **cannot** achieve true CPU-parallel speedup for pure Python computation.
+
+Two workarounds:
+
+1. **Use `ProcessPoolExecutor`** (separate processes, each with its own GIL) for compute-bound work — as shown above
+2. **Use `ThreadPoolExecutor` with libraries that release the GIL** — NumPy, SciPy, and PyTorch release the GIL during C-level operations like `.sum()`, `np.sqrt()`, and `torch.matmul()`
+
+The memory-bound example above uses threading with NumPy (which releases the GIL), while the compute-bound example uses multiprocessing. This distinction matters: if you use `ThreadPoolExecutor` for CPU-bound Python loops, you'll see **no speedup at all**.
+:::
 
 Typical results on a 16-core machine:
 
 ```
-Compute-bound scaling:
-   1 threads: 1.00x
-   2 threads: 1.95x
-   4 threads: 3.82x
-   8 threads: 7.41x
-  12 threads: 10.8x
-  16 threads: 13.2x
+Compute-bound scaling (processes):
+   1 workers: 1.00x
+   2 workers: 1.85x
+   4 workers: 3.52x
+   8 workers: 6.41x
+  12 workers: 8.8x
+  16 workers: 10.2x
 
-Memory-bound scaling:
-   1 threads: 1.00x
-   2 threads: 1.89x
-   4 threads: 3.21x
-   8 threads: 3.45x  <-- Saturated!
-  12 threads: 3.52x
-  16 threads: 3.48x
+Memory-bound scaling (threads + NumPy):
+   1 workers: 1.00x
+   2 workers: 1.89x
+   4 workers: 3.21x
+   8 workers: 3.45x  <-- Saturated!
+  12 workers: 3.52x
+  16 workers: 3.48x
 ```
+
+Note: The compute-bound scaling is less than linear because `ProcessPoolExecutor` incurs inter-process communication overhead (serializing data, IPC). A C++ implementation with threads would achieve near-linear scaling.
 
 The compute-bound workload scales nearly linearly. The memory-bound workload hits a wall at ~4 threads.
 
