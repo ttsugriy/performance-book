@@ -517,7 +517,10 @@ combined = [1, 2, 3, 4, 5, 100]  # median = 3.5
 
 **Percentiles**: Generally not associative (though there are approximate streaming algorithms).
 
-**Floating-Point Gotchas**: Mathematically, addition is associative. On computers:
+::: {.callout-warning}
+## Floating-Point Non-Associativity
+
+Mathematically, addition is associative. In IEEE 754 floating-point, it is **not**:
 
 ```python
 >>> (1e-16 + 1.0) - 1.0
@@ -526,7 +529,14 @@ combined = [1, 2, 3, 4, 5, 100]  # median = 3.5
 1e-16
 ```
 
-Floating-point addition is *not* associative due to rounding. For most purposes, we pretend it is—but be aware when precision matters.
+This means `(a + b) + c != a + (b + c)` in floating-point. Reordering additions (as parallel reduction does) can change results slightly. In practice:
+
+- **Deep learning**: The differences are negligible. SGD noise dwarfs floating-point reordering effects.
+- **Scientific computing**: May matter. Kahan summation or compensated algorithms can help.
+- **Reproducibility**: Non-deterministic reduction order (GPU, multi-threaded) means results may differ between runs. Use `torch.use_deterministic_algorithms(True)` when exact reproducibility is needed (at a performance cost).
+
+For most purposes in this book, we treat floating-point operations as associative. See the [Numerical Precision appendix](22-numerical-precision.qmd) for when this breaks down.
+:::
 
 ## The Hardware Connection
 
