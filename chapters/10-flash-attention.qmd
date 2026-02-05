@@ -614,7 +614,11 @@ FlashAttention:
 2. Compute everything in SRAM
 3. Write O_tile to HBM
 
-Total HBM accesses: O(nd) for loading Q, K, V, O once
+Total HBM accesses: O(n²d²/M) where M is SRAM size — Q is loaded once,
+but K and V are loaded once per Q-tile (the inner loop streams over K/V
+for each Q-tile). With tile size √M, this is much less than O(n²) but
+more than O(nd). For typical values (n=2048, d=64, M=100KB), the actual
+traffic is ~10× less than standard attention.
 
 The reduction in memory traffic often exceeds the extra compute cost.
 
