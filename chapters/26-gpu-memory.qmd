@@ -131,14 +131,15 @@ The visualization shows:
 ```
 Scenario: Allocate and free tensors of varying sizes
 
-Step 1: Allocate A (1GB), B (2GB), C (1GB)
-Memory: [A:1GB][B:2GB][C:1GB][free:4GB]
+Step 1: Allocate A (2GB), B (3GB), C (2GB)
+Memory: [A:2GB][B:3GB][C:2GB][free:1GB]
 
-Step 2: Free B
-Memory: [A:1GB][free:2GB][C:1GB][free:4GB]
+Step 2: Free A and B
+Memory: [free:2GB][free:3GB][C:2GB][free:1GB]
 
-Step 3: Try to allocate D (3GB)
-Problem: Have 6GB free, but no contiguous 3GB block!
+Step 3: Try to allocate D (5GB)
+Problem: Have 6GB free, but no contiguous 5GB block!
+(largest contiguous region is 3GB)
 
 PyTorch options:
 1. Fail with OOM (even though total free > requested)
@@ -223,8 +224,10 @@ for epoch in range(num_epochs):
 y = x + 1
 y = y * 2  # x + 1 is still allocated until y * 2 completes
 
-# Better: In-place operations
+# Better: In-place operations (inference only!)
 y = x.add_(1).mul_(2)  # No intermediate allocation
+# WARNING: In-place ops can corrupt autograd during training.
+# Only use in-place ops in inference or no-grad contexts.
 
 # Best: Fused operation
 @torch.compile
