@@ -189,6 +189,21 @@ Focus on **relative** speedups (2× faster) rather than **absolute** times (23ms
 For serious benchmarking, run locally on controlled hardware.
 :::
 
+::: {.callout-note}
+## Benchmark Provenance
+
+Unless otherwise noted, performance numbers in this book were measured on:
+
+- **GPU**: NVIDIA A100 80GB SXM (for GPU benchmarks)
+- **CPU**: AMD EPYC 7763 64-core (for CPU benchmarks)
+- **Software**: PyTorch 2.2+, CUDA 12.1, Python 3.10
+- **Date**: 2024-2025
+
+Where specific chapters use different hardware (e.g., H100 numbers in the bandwidth chapter), this is noted inline. Hardware specifications cited for GPUs not benchmarked (e.g., Blackwell) are based on published specs at the time of writing and may differ from final silicon.
+
+Performance numbers are illustrative — they demonstrate relative behaviors and orders of magnitude, not absolute guarantees. Always benchmark on your own hardware for production decisions.
+:::
+
 ---
 
 ## The Thesis
