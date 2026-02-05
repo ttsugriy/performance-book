@@ -5,25 +5,37 @@ id: sec-gpu-architecture
 ---
 
 ::: {.chapter-opener}
-CPUs are designed for latency: finish one task as fast as possible. GPUs are designed for throughput: finish as many tasks as possible.
+A naive matrix multiply on GPU runs at 0.2 TFLOPS. cuBLAS achieves 280 TFLOPS on the same hardware.
 
-This fundamental difference shapes everything about GPU programming—and everything about modern ML performance.
+That's a **1,400× gap** — on the *same chip*, with the *same algorithm*. Why?
+
+The answer lies in how GPUs actually work. This chapter investigates that gap.
 :::
 
-## Why GPUs?
+## The Puzzle: 1,400× on the Same Hardware
 
-An NVIDIA A100 GPU delivers:
-- 19.5 TFLOPS (FP32)
-- 312 TFLOPS (FP16 with tensor cores)
-- 1,600-2,000 GB/s memory bandwidth (A100 SXM 40-80GB; PCIe lower)
+Let's make the gap concrete. Here's the simplest possible matrix multiply kernel:
 
-A modern CPU (Intel Xeon Platinum) delivers:
-- ~2 TFLOPS (FP32)
-- ~200 GB/s memory bandwidth
+```cuda
+__global__ void naive_matmul(float* C, float* A, float* B, int N) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    float sum = 0.0f;
+    for (int k = 0; k < N; k++)
+        sum += A[row * N + k] * B[k * N + col];
+    C[row * N + col] = sum;
+}
+```
 
-**The GPU can be up to ~100× faster for dense linear algebra (depending on dtype, shape, and batch size).**
+On an A100 for N=4096: **~0.2 TFLOPS**. The A100's peak: **312 TFLOPS** (FP16 tensor core) or **19.5 TFLOPS** (FP32). We're at **1% of even the FP32 peak**.
 
-But this performance comes with constraints. Understanding GPU architecture is essential for writing fast code.
+To close this gap, we need to understand three things about GPU hardware:
+
+1. **The execution model**: How thousands of threads coordinate without chaos
+2. **The memory hierarchy**: Why data location matters more than computation
+3. **The specialized hardware**: Tensor cores, async copy, and what they demand
+
+Let's investigate each.
 
 ## The Execution Model: Hierarchy of Parallelism
 

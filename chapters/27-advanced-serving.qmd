@@ -5,30 +5,38 @@ id: sec-advanced-serving
 ---
 
 ::: {.chapter-opener}
-Serving LLMs at scale is a systems engineering challenge. Latency SLAs, cost efficiency, and reliability all matter.
+Your LLM serving system handles 1,000 requests/second with P50 latency of 80ms. The product team wants 10,000 req/s at the same latency. Buying 10× more GPUs would cost $500K/month.
 
-This chapter covers the techniques that power production inference at companies serving billions of requests.
+Can you get there without 10× the hardware? This chapter follows one request through a production system, showing why each optimization exists.
 :::
 
 ::: {.callout-note}
-## Property Spotlight: Redundancy + Sparsity
+## Property Spotlight: Redundancy + Sparsity + Separability
 
 Prefix caching / RadixAttention exploits **redundancy**: many requests share common prefixes whose KV cache entries are identical. Speculative decoding exploits **sparsity** in the draft-target disagreement: most draft tokens are accepted, so verification is sparse. Disaggregated serving exploits **separability**: prefill and decode have different resource profiles and can be factored onto different hardware.
 :::
 
-## Beyond Basic Inference
+## The Investigation: Anatomy of a Request
 
-Chapter 14 covered fundamentals: KV caching, continuous batching, speculative decoding. This chapter goes deeper into production-grade techniques.
+Before cataloging techniques, let's trace a single request through a production LLM system and identify every bottleneck:
 
 ```
-Production LLM serving requirements:
+User sends: "Translate to French: Hello, how are you?"
 
-Latency:      P99 < 200ms time-to-first-token
-Throughput:   10,000+ requests/second
-Cost:         < $0.001 per 1K tokens
-Reliability:  99.9% uptime
-Flexibility:  Multiple models, variable load
+1. Load balancer routes to a GPU server     (~1ms network)
+2. Tokenizer encodes the prompt              (~0.5ms CPU)
+3. KV cache lookup for shared prefix         (~0.1ms)
+4. Prefill: process all prompt tokens        (~15ms, compute-bound)
+5. Decode: generate tokens one at a time     (~8ms/token, memory-bound)
+6. Detokenize and stream back                (~0.1ms/token)
+
+Total for 20-token response: ~175ms
+Target: <200ms P99. Barely making it at low load.
 ```
+
+At 10,000 req/s, the system collapses — queueing delays explode (@sec-queueing). Each technique in this chapter attacks a specific bottleneck in this pipeline. Let's see which ones give us that 10× throughput.
+
+Chapter 14 covered the fundamentals: KV caching, continuous batching, speculative decoding. This chapter goes deeper with production-grade techniques.
 
 ## Prefix Caching and RadixAttention
 

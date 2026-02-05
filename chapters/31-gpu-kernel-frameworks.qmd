@@ -5,14 +5,14 @@ id: sec-gpu-kernel-frameworks
 ---
 
 ::: {.chapter-opener}
-Writing fast GPU kernels used to mean writing CUDA C++. Not anymore.
+You need a custom fused softmax kernel. You implement it in Triton in 30 lines and get 85% of cuDNN performance. Good enough?
 
-A new generation of frameworks—CuTile, CuTe DSL, ThunderKittens—offers different tradeoffs between ease of use and performance control. Understanding when to use each is essential for modern GPU programming.
+Sometimes yes. But when you need that last 15%, you reach for lower-level tools — and the landscape has exploded. This chapter implements the same kernel in five frameworks to show what each gains and costs.
 :::
 
-## The Framework Landscape
+## The Investigation: One Kernel, Five Frameworks
 
-The GPU kernel development ecosystem has evolved dramatically:
+Rather than survey each framework in isolation, we'll implement **fused online softmax** — a kernel simple enough to be instructive, complex enough to expose real tradeoffs — across the modern GPU kernel development ecosystem:
 
 ```
 2012: CUDA C++ (only option)
@@ -38,6 +38,8 @@ Abstracts away:        Exposes:
 - Tensor cores         - Register allocation
 - Synchronization      - Async copy pipelines
 ```
+
+For each framework, we'll ask: How many lines of code? What does the code look like? What performance do we achieve? What did we have to understand about the hardware?
 
 ## CuTile: NVIDIA's Python Abstraction
 
