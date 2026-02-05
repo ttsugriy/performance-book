@@ -44,8 +44,17 @@ This glossary defines key terms used throughout the book. Terms are organized al
 **Fused Kernel**
 : A GPU kernel that combines multiple operations into a single pass over data, reducing memory traffic. Example: fusing ReLU into matrix multiply.
 
+**Graph Break**
+: In `torch.compile`, a point where the compiler cannot continue tracing a single computational graph, forcing a split into separate compiled regions. Caused by data-dependent control flow, Python side effects, or unsupported operations. See @sec-torch-compile.
+
+**GQA (Grouped-Query Attention)**
+: A variant of multi-head attention where K/V projections are shared across groups of query heads. A middle ground between standard MHA and Multi-Query Attention. Used in LLaMA-2 and most modern LLMs.
+
 **HBM (High Bandwidth Memory)**
-: GPU memory with high bandwidth (3+ TB/s on modern GPUs) but limited capacity (40-80GB). The primary memory for large tensors.
+: GPU memory with high bandwidth (2-5+ TB/s on modern GPUs) but limited capacity (40-192GB). The primary memory for large tensors.
+
+**KV Cache**
+: Cached key and value tensors from previous tokens in autoregressive generation. Avoids redundant recomputation, reducing generation from O(n²) to O(n). Size grows linearly with sequence length and is often the memory bottleneck for inference. See @sec-inference.
 
 **L1/L2/L3 Cache**
 : Hierarchical on-chip memory with decreasing speed and increasing size. L1 is fastest (1-4 cycles), L3 is slowest but largest.
@@ -75,13 +84,19 @@ This glossary defines key terms used throughout the book. Terms are organized al
 : An architecture where only a subset of model parameters are activated for each input. Enables larger models without proportional compute increase.
 
 **Monoid**
-: An algebraic structure with an associative operation and identity element. The theoretical foundation for parallel reductions and streaming algorithms.
+: An algebraic structure consisting of a set with a closed, associative binary operation and an identity element. The theoretical foundation for parallel reductions and streaming algorithms. Example: (integers, +, 0) is a monoid.
+
+**NVLink**
+: High-speed interconnect between GPUs within a node. Provides 600-900 GB/s bidirectional bandwidth per GPU, much faster than PCIe. Critical for tensor parallelism.
 
 **Operator Fusion**
 : Combining multiple operations into a single kernel to reduce memory traffic. A key optimization in deep learning compilers like torch.compile.
 
 **Prefetching**
 : Loading data into cache before it's needed, hiding memory latency. Hardware prefetchers detect streaming access patterns; software can provide explicit hints.
+
+**Parallel Scan (Prefix Sum)**
+: An algorithm that computes all prefix reductions of a sequence using an associative operator. Runs in O(n) work and O(log n) depth. The parallel primitive underlying FlashAttention's online softmax and SSM parallel computation.
 
 **Quantization**
 : Representing numbers with fewer bits (e.g., FP16 instead of FP32, or INT8 instead of FP16). Reduces memory footprint and bandwidth, sometimes with specialized hardware support.
@@ -101,14 +116,23 @@ This glossary defines key terms used throughout the book. Terms are organized al
 **Separability**
 : A property where a function can be decomposed into simpler, independent components. Enables factorization optimizations like separable filters and low-rank approximations.
 
+**Shared Memory (GPU)**
+: Fast on-chip memory accessible to all threads within a GPU thread block. Used for inter-thread communication, data reuse, and manual caching. Distinct from system shared memory.
+
 **SIMD**
 : Single Instruction, Multiple Data. Processing multiple data elements with a single instruction. Essential for efficient vectorized code.
+
+**Softmax**
+: The function $\text{softmax}(x)_i = e^{x_i} / \sum_j e^{x_j}$ that converts logits to probabilities. Its decomposable structure (the (max, sum, weighted_sum) state forms a monoid) enables online/streaming computation, which is key to FlashAttention.
 
 **Sparsity**
 : Having many zero or near-zero values in a matrix or tensor. Structured sparsity (e.g., 2:4 patterns) enables hardware acceleration.
 
 **SRAM (Static RAM)**
 : Fast on-chip memory used for caches and GPU shared memory. Lower latency than DRAM but limited capacity. GPU shared memory is typically 100-200KB per SM.
+
+**State-Space Model (SSM)**
+: A sequence model based on linear recurrences $h_t = Ah_{t-1} + Bx_t$, $y_t = Ch_t$. Enables O(n) sequence processing vs. attention's O(n²). The recurrence's associativity enables parallel computation via scan. See @sec-ssm.
 
 **Streaming Algorithm**
 : An algorithm that processes data in a single pass, maintaining only a small summary state. Enabled by associative operations with bounded state.
@@ -117,7 +141,10 @@ This glossary defines key terms used throughout the book. Terms are organized al
 : A property where a computation is invariant or equivariant under some transformation. Enables weight sharing (CNNs), Fourier methods, and group equivariant networks. Noether's theorem connects symmetry to conservation laws.
 
 **Tensor Core**
-: Specialized hardware for matrix multiply-accumulate operations. Achieves much higher throughput than standard FP32 cores but requires specific data formats.
+: Specialized hardware for matrix multiply-accumulate operations. Achieves much higher throughput than standard FP32 cores but requires specific data formats (FP16, BF16, INT8, FP8).
+
+**Tensor Parallelism**
+: Distributing individual tensor operations (e.g., a single matrix multiply) across multiple GPUs. Requires high-bandwidth interconnect (NVLink). See @sec-distributed.
 
 **Tiling**
 : Dividing data into blocks that fit in fast memory, processing each tile entirely before moving to the next. Reduces memory traffic at the cost of code complexity.
@@ -127,6 +154,9 @@ This glossary defines key terms used throughout the book. Terms are organized al
 
 **Utilization**
 : The fraction of time a server is busy, $\rho = \lambda / \mu$. As utilization approaches 1, queueing delay grows rapidly.
+
+**Warp**
+: A group of 32 threads on NVIDIA GPUs that execute in lockstep (SIMT). All threads in a warp must execute the same instruction; conditional branches cause "warp divergence" where some threads are masked.
 
 **Working Set**
 : The set of data actively being accessed. Performance depends on whether the working set fits in each cache level.
@@ -151,10 +181,27 @@ This glossary defines key terms used throughout the book. Terms are organized al
 | Reversibility | Reversibility |
 | Redundancy | Redundancy |
 | Symmetry | Symmetry |
+| Matrix multiply | Matrix Multiply |
 | FlashAttention | FlashAttention |
 | LoRA | LoRA |
 | Quantization | Quantization |
+| State-space models | State-Space Models |
+| Distributed training | Distributed Training |
+| Inference / KV caching | Inference Optimization |
+| Mixture of Experts | Mixture of Experts |
+| Long context / RoPE | Long-Context Attention |
+| GPU memory management | Mastering GPU Memory |
 | Queueing theory | Queueing Theory for Serving |
+| Advanced serving | Advanced LLM Serving |
 | Measurement | The Art of Measurement |
-| Benchmarking best practices | The Art of Measurement |
+| Hypothesis-driven debugging | The Art of Hypothesis |
+| Profiling tools | Profiling Tools |
+| Operator fusion | Fusion |
+| torch.compile | torch.compile Deep Dive |
+| Triton programming | Writing Fast Kernels with Triton |
+| Kernel frameworks | Modern GPU Kernel Frameworks |
+| Hardware-specific opts | Hardware-Specific Optimization |
+| Compiler optimizations | Compiler Optimizations |
+| Numerical precision | Numerical Precision |
+| Production case studies | Production Case Studies |
 :::
