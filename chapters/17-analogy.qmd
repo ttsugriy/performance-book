@@ -260,6 +260,15 @@ Biased search fails when the prior is wrong. Momentum fails when:
 
 The fix is the same: **weaken the bias** (smaller $\beta$, adaptive schedules).
 
+:::: {.callout-tip}
+## Modern note: Muon and friends
+
+Recent optimizers (for example, Muon) revisit the same idea: treat momentum as a
+bias toward persistent direction, then tune how strongly you trust it under
+noise and curvature. The details evolve quickly; the structural question stays
+the same: does the bias improve progress per step for your objective?
+::::
+
 ## The Pattern Library
 
 Over time, you build a library of patterns that keep recurring. Here are the most useful:
