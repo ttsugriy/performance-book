@@ -482,6 +482,24 @@ This ensures:
 - No cache conflicts between tiles
 - Perfect prefetching
 
+:::: {.callout-note}
+## Zero-copy transpose: row vs column major
+
+BLAS/cuBLAS expects **column-major** layout. Most C/C++/Python arrays are
+**row-major**. The key identity is that a row-major matrix has the **same byte
+layout** as its transpose in column-major. For $C = AB$:
+
+$$A_{\text{row}} \equiv (A^T)_{\text{col}}, \quad B_{\text{row}} \equiv (B^T)_{\text{col}}$$
+$$C^T = B^T A^T$$
+
+So you can **swap operands and flip transpose flags** to get the same result,
+with no explicit transpose or data movement. This is why frameworks "just work"
+with cuBLAS: they pass leading dimensions and op flags, not extra copy kernels.
+
+**Caveat**: This is free only for contiguous (or simple stride) layouts. For
+non-contiguous views, you may need a real copy or a different kernel.
+::::
+
 ### 5. Prefetching
 
 BLAS explicitly prefetches the next tile while computing the current one:
