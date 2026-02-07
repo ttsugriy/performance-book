@@ -65,6 +65,24 @@ $$\text{Speedup} = \frac{1}{0.9 + 0.01} = 1.099$$
 
 Total speedup: 9.9%. Was three days of optimization worth that?
 
+:::: {.callout-note}
+## Theory of Constraints: optimize the bottleneck
+
+Goldratt's Theory of Constraints says every system has exactly one constraint.
+Optimizing anything else yields little or nothing.
+
+**The 5-step loop**:
+1. Identify the constraint (profile end-to-end)
+2. Exploit it (optimize without major investment)
+3. Subordinate everything else (match pace to the bottleneck)
+4. Elevate it (add resources to the constraint)
+5. Repeat (the constraint shifts)
+
+The counterintuitive step is **subordinate**. Non-bottlenecks should slow down.
+Rate limits, backpressure, and batch sizing aligned with the constraint prevent
+work-in-progress explosion (Little's Law; see @sec-queueing).
+::::
+
 ### Case 3: It's Fast Enough
 
 Your API responds in 50ms. Your SLA requires < 100ms. There's no user-visible benefit to going faster.
