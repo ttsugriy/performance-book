@@ -178,6 +178,88 @@ Once you recognize the analogy, the solution structure transfers:
 
 The database community solved this decades ago. FlashAttention rediscovered it.
 
+## Case Study: Momentum as Biased Search
+
+Another powerful analogy connects **optimization dynamics** to **biased search**.
+The payoff is performance: fewer iterations to reach the same quality.
+
+### The Source Problem: Biased Binary Search
+
+Classic binary search splits the interval in half because it assumes the target
+is uniformly distributed. If you have a **prior** (the target is likely closer
+to one side), you can split asymmetrically:
+
+```
+mid = left + p * (right - left)   # p != 0.5
+```
+
+Pick `p` to match your belief. This is just an asymmetric split based on a prior
+(not interpolation search). When the bias is right, expected search time drops.
+
+### The Target Problem: Gradient Descent with Momentum
+
+Plain gradient descent steps in the direction of the current gradient:
+
+$$x_{t+1} = x_t - \eta g_t$$
+
+where $g_t = \nabla f(x_t)$.
+
+Momentum adds **inertia**. It assumes the next gradient will look like the last:
+
+$$v_{t+1} = \beta v_t + g_t$$
+$$x_{t+1} = x_t - \eta v_{t+1}$$
+
+Nesterov momentum uses a look-ahead correction:
+
+$$v_{t+1} = \beta v_t + g(x_t - \eta \beta v_t)$$
+$$x_{t+1} = x_t - \eta v_{t+1}$$
+
+Intuition: in narrow valleys, plain GD zig-zags; momentum smooths the path by
+carrying direction across steps.
+
+![](../assets/momentum-zigzag.svg){fig-cap="Momentum smooths zig-zagging in narrow valleys."}
+
+:::: {.callout-note}
+## Historical note: Polyak's heavy ball (1964)
+
+The original momentum analogy is a damped ball rolling in a potential well.
+Labels are in Russian, but the geometry is the point.
+
+![](../assets/polyak-momentum.png){fig-cap="Polyak's heavy-ball intuition: inertia + damping in a potential well."}
+::::
+
+### The Analogy
+
+```
+Biased binary search        →  Momentum descent
+────────────────────────────────────────────────
+Prior over target location  →  Prior over gradient direction
+Asymmetric split            →  Inertial (biased) step
+Wrong bias costs extra      →  Oscillation / overshoot
+```
+
+In both cases, you **spend more effort in the direction you believe is right**.
+If the structure holds (smooth objective, correlated gradients), you get
+faster convergence. If not, you pay for the bias.
+
+### The Transfer
+
+The structural lesson is not "always use momentum." It's:
+
+1. **Exploit temporal coherence**: If gradients are correlated, reuse direction.
+2. **Bias cautiously**: Larger $\beta$ is a stronger prior, not a free lunch.
+3. **Measure in iterations**: Performance is *steps × cost/step*.
+
+### When the Analogy Breaks
+
+Biased search fails when the prior is wrong. Momentum fails when:
+
+- Gradients are noisy or non-stationary
+- Curvature changes sharply (narrow valleys, sharp minima)
+- The loss surface has frequent direction reversals
+
+The fix is the same: **weaken the bias** (smaller $\beta$, adaptive schedules).
+
 ## The Pattern Library
 
 Over time, you build a library of patterns that keep recurring. Here are the most useful:
