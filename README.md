@@ -86,6 +86,8 @@ The source of truth for the ToC is `_quarto.yml`. At a high level, the book is o
 - **Part VII: Synthesis**
 - **Appendices**
 
+Chapter file prefixes are historical and are not used as the reading order. Always rely on `_quarto.yml` and in-book navigation for canonical sequencing.
+
 ## 🤝 Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
