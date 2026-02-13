@@ -112,10 +112,7 @@ Different readers have different goals. Here are recommended paths through the m
 
 For researchers and those seeking deep understanding of *why* optimizations work.
 
-```
-The Algebraic Framework → Part I (Hardware) → Part II (Algebra)
-    → FlashAttention → LoRA → State Space Models
-```
+[The Algebraic Framework](chapters/00-algebraic-framework.qmd) -> [The Memory Hierarchy](chapters/01-memory-hierarchy.qmd) -> [Thinking in Bandwidth](chapters/02-bandwidth.qmd) -> [When Parallelism Pays](chapters/03-parallelism.qmd) -> [GPU Architecture and Programming Model](chapters/04-gpu-architecture.qmd) -> [Associativity](chapters/04-chunking.qmd) -> [Separability](chapters/05-factoring.qmd) -> [Sparsity](chapters/06-skipping.qmd) -> [Reversibility](chapters/06-reversibility.qmd) -> [Locality](chapters/07-locality.qmd) -> [Redundancy](chapters/p2-redundancy.qmd) -> [Symmetry](chapters/p2-symmetry.qmd) -> [Investigation: FlashAttention](chapters/10-flash-attention.qmd) -> [Investigation: LoRA](chapters/11-lora.qmd) -> [State-Space Models](chapters/28-state-space-models.qmd)
 
 **Focus on:** Mathematical derivations, property recognition, first-principles reasoning.
 
@@ -125,11 +122,7 @@ The Algebraic Framework → Part I (Hardware) → Part II (Algebra)
 
 For practitioners building production systems who need practical speedups.
 
-```
-The Algebraic Framework (skim) → Memory Hierarchy → GPU Architecture
-    → Inference → Advanced Serving → GPU Memory → Quantization
-    → Profiling Tools → torch.compile
-```
+[The Algebraic Framework](chapters/00-algebraic-framework.qmd) (skim) -> [The Memory Hierarchy](chapters/01-memory-hierarchy.qmd) -> [GPU Architecture and Programming Model](chapters/04-gpu-architecture.qmd) -> [Inference Optimization](chapters/14-inference.qmd) -> [Advanced LLM Serving](chapters/27-advanced-serving.qmd) -> [Mastering GPU Memory](chapters/26-gpu-memory.qmd) -> [Investigation: Quantization](chapters/12-quantization.qmd) -> [Profiling Tools: From Novice to Expert](chapters/19-profiling-tools.qmd) -> [torch.compile Deep Dive](chapters/29-torch-compile.qmd)
 
 **Focus on:** Bottleneck identification, configuration tuning, practical patterns.
 
@@ -139,10 +132,7 @@ The Algebraic Framework (skim) → Memory Hierarchy → GPU Architecture
 
 For engineers who need to implement novel operations or optimize beyond libraries.
 
-```
-GPU Architecture → Matrix Multiply → FlashAttention
-    → Triton → GPU Kernel Frameworks → Profiling Tools
-```
+[GPU Architecture and Programming Model](chapters/04-gpu-architecture.qmd) -> [Investigation: Matrix Multiply](chapters/09-matrix-multiply.qmd) -> [Investigation: FlashAttention](chapters/10-flash-attention.qmd) -> [Writing Fast Kernels with Triton](chapters/21-triton.qmd) -> [Modern GPU Kernel Frameworks](chapters/31-gpu-kernel-frameworks.qmd) -> [Profiling Tools: From Novice to Expert](chapters/19-profiling-tools.qmd)
 
 **Focus on:** Memory hierarchy on GPU, tiling patterns, Triton/CUDA programming.
 
@@ -154,12 +144,12 @@ Each major topic is approachable with minimal prerequisites:
 
 | Topic | Prerequisites | Chapter(s) |
 |-------|---------------|------------|
-| FlashAttention | Algebraic Framework, Memory Hierarchy | FlashAttention |
-| LoRA | Algebraic Framework, Factoring | LoRA |
-| Quantization | Memory Hierarchy, Bandwidth | Quantization |
-| Distributed Training | Parallelism, GPU Architecture | Distributed |
-| LLM Serving | Inference, GPU Memory | Advanced Serving |
-| MoE | Skipping, Distributed | Mixture of Experts |
+| FlashAttention | [The Algebraic Framework](chapters/00-algebraic-framework.qmd), [The Memory Hierarchy](chapters/01-memory-hierarchy.qmd) | [Investigation: FlashAttention](chapters/10-flash-attention.qmd) |
+| LoRA | [The Algebraic Framework](chapters/00-algebraic-framework.qmd), [Separability](chapters/05-factoring.qmd) | [Investigation: LoRA](chapters/11-lora.qmd) |
+| Quantization | [The Memory Hierarchy](chapters/01-memory-hierarchy.qmd), [Thinking in Bandwidth](chapters/02-bandwidth.qmd) | [Investigation: Quantization](chapters/12-quantization.qmd) |
+| Distributed Training | [When Parallelism Pays](chapters/03-parallelism.qmd), [GPU Architecture and Programming Model](chapters/04-gpu-architecture.qmd) | [Distributed Training](chapters/13-distributed.qmd) |
+| LLM Serving | [Inference Optimization](chapters/14-inference.qmd), [Mastering GPU Memory](chapters/26-gpu-memory.qmd) | [Advanced LLM Serving](chapters/27-advanced-serving.qmd) |
+| MoE | [Sparsity](chapters/06-skipping.qmd), [Distributed Training](chapters/13-distributed.qmd) | [Mixture of Experts](chapters/24-mixture-of-experts.qmd) |
 
 ---
 
