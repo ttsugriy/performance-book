@@ -702,9 +702,7 @@ The accompanying notebook lets you:
 - Experiment with hardware-specific settings
 - Benchmark across configurations
 
-<!-- Notebook coming soon
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/30-hardware-specific.ipynb)
--->
+Notebook support for this chapter is in progress. For now, run the profiling workflow locally and benchmark on your target hardware.
 :::
 
 ## Further Reading

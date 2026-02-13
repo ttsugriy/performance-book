@@ -426,7 +426,7 @@ The accompanying notebook walks through:
 - Implementing FFT convolution and measuring the crossover point
 - Visualizing learned CNN filters to see translation symmetry in action
 
-<!-- Notebook coming soon -->
+Notebook support for this chapter is in progress. For now, run the exercises locally and record crossover points on your hardware.
 :::
 
 ---

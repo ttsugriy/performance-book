@@ -1068,9 +1068,7 @@ The accompanying notebook lets you:
 - Compare speculative decoding strategies
 - Build a simple multi-model router
 
-<!-- Notebook coming soon
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/27-advanced-serving.ipynb)
--->
+Notebook support for this chapter is in progress. For now, implement the patterns locally and evaluate latency/throughput on your serving stack.
 :::
 
 ## Further Reading

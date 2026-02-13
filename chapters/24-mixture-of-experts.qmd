@@ -601,9 +601,7 @@ The accompanying notebook lets you:
 - Experiment with load balancing losses
 - Measure the capacity-compute tradeoff
 
-<!-- Notebook coming soon
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ttsugriy/performance-book/blob/main/notebooks/tier2-experimental/24-mixture-of-experts.ipynb)
--->
+Notebook support for this chapter is in progress. For now, prototype these experiments locally and compare routing/load-balancing behavior on your setup.
 :::
 
 ## Further Reading

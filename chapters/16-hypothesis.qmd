@@ -249,7 +249,7 @@ dataloader = DataLoader(dataset, batch_size=32, num_workers=0)
 
 # Proposed fix
 dataloader = DataLoader(dataset, batch_size=32, num_workers=4)
-# Time: ???
+# Time: measure on your hardware
 
 # Result: 12 min/epoch (2.5× faster)
 ```
