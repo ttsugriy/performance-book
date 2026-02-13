@@ -31,7 +31,7 @@ The book includes three types of interactivity:
 
 ## 🏃 Run the Notebooks
 
-Each chapter has associated notebooks. Choose your environment:
+Many chapters include associated notebooks, and coverage is expanding. Choose your environment:
 
 | Tier | Purpose | Platform | GPU |
 |------|---------|----------|-----|
