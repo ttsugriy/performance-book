@@ -613,7 +613,7 @@ This chapter provides the theoretical foundation for the entire book:
 
 **Part III (Investigations):** Extended case studies applying multiple properties to real problems.
 
-**Part IV (Method):** The process of recognizing and applying properties in practice.
+**Part V (Method):** The process of recognizing and applying properties in practice.
 
 Every subsequent chapter can be read through this lens: "What property enables this optimization?"
 
