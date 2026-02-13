@@ -567,7 +567,7 @@ Use Dense when:
   ✓ Latency-critical applications
 ```
 
-## Connection to Other Chapters
+## Connections
 
 **Skipping/Sparsity**: MoE is structured sparsity—most parameters are zero for any given input.
 

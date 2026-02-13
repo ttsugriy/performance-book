@@ -512,7 +512,7 @@ def verify_precision_safety(model, test_loader, precision='fp16'):
 5. **Debug in FP32 first**: If it's broken in FP32, lower precision won't fix it
 6. **Verify before deploying**: Compare reduced precision outputs to FP32 baseline
 
-## Connection to Other Chapters
+## Connections
 
 - **GPU Architecture**: Tensor cores provide the hardware speedup for reduced precision
 - **Quantization**: Post-training quantization for inference complements training-time precision choices

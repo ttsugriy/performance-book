@@ -707,7 +707,7 @@ jobs:
 5. **Communication scales poorly**: Design for minimal cross-device data movement
 6. **Monitor continuously**: Catch regressions early with automated tracking
 
-## Connection to Other Chapters
+## Connections
 
 - **Profiling Tools**: The specific tools used in these investigations
 - **Distributed Training**: Theoretical background for scaling issues

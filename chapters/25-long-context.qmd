@@ -717,7 +717,7 @@ Sequence Length    Technique
 >1M               Hierarchical/Retrieval + Ring Attention
 ```
 
-## Connection to Other Chapters
+## Connections
 
 **FlashAttention**: Foundation—online softmax enables ring attention.
 
