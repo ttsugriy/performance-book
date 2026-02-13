@@ -1,5 +1,5 @@
 ---
-title: "State-Space Models"
+title: "Investigation: State-Space Models"
 subtitle: "Linear-Time Alternatives to Attention"
 id: sec-ssm
 ---
