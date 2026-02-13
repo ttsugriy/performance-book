@@ -22,7 +22,7 @@ From Fourier to LoRA: the principle that complex structures often hide simple, s
 
 ## The Bet on Structure
 
-Chapter 4 showed how associativity lets us chunk, stream, and parallelize. This chapter explores a different property: **separability**.
+The Associativity chapter showed how associativity lets us chunk, stream, and parallelize. This chapter explores a different property: **separability**.
 
 Some computations that look irreducibly large can be factored into smaller pieces. Not approximately—exactly, or close enough that it doesn't matter.
 
@@ -467,7 +467,7 @@ This is why techniques like:
 
 ## Connection to LoRA Investigation
 
-Chapter 11 explores LoRA in depth:
+The LoRA chapter explores LoRA in depth:
 
 - How to choose rank empirically
 - Which layers to adapt

@@ -161,7 +161,7 @@ for (int i = 0; i < N; i++) {
 2. `a[i]` stays in registers between ops
 3. Better cache locality
 
-**This is operator fusion (Chapter 8) at the compiler level!**
+**This is operator fusion (Fusion) at the compiler level!**
 
 ### Loop Fission (Distribution)
 
@@ -683,11 +683,11 @@ void matmul(float* C, float* A, float* B, int N) {
 
 ## Connections
 
-**Chapter 7 (Locality)**: Loop tiling is a locality optimization the compiler sometimes does.
+**Locality**: Loop tiling is a locality optimization the compiler sometimes does.
 
-**Chapter 8 (Fusion)**: Loop fusion at the compiler level.
+**Fusion**: Loop fusion at the compiler level.
 
-**Chapter 19 (Profiling)**: Use profiling to find optimization opportunities, then check compiler reports.
+**Profiling**: Use profiling to find optimization opportunities, then check compiler reports.
 
 ## Key Takeaways
 

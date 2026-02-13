@@ -569,13 +569,13 @@ Use Dense when:
 
 ## Connection to Other Chapters
 
-**Chapter 6 (Skipping/Sparsity)**: MoE is structured sparsity—most parameters are zero for any given input.
+**Skipping/Sparsity**: MoE is structured sparsity—most parameters are zero for any given input.
 
-**Chapter 3 (Parallelism)**: Expert parallelism is a new dimension beyond data/tensor/pipeline parallel.
+**Parallelism**: Expert parallelism is a new dimension beyond data/tensor/pipeline parallel.
 
-**Chapter 13 (Distributed)**: All-to-all communication is MoE's unique distributed primitive.
+**Distributed**: All-to-all communication is MoE's unique distributed primitive.
 
-**Chapter 14 (Inference)**: MoE inference has unique challenges around expert caching and memory.
+**Inference**: MoE inference has unique challenges around expert caching and memory.
 
 ## Key Takeaways
 

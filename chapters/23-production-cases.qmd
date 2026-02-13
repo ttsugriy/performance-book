@@ -709,9 +709,9 @@ jobs:
 
 ## Connection to Other Chapters
 
-- **Chapter 19 (Profiling Tools)**: The specific tools used in these investigations
-- **Chapter 13 (Distributed Training)**: Theoretical background for scaling issues
-- **Chapter 15 (Measurement)**: The scientific method applied to debugging
+- **Profiling Tools**: The specific tools used in these investigations
+- **Distributed Training**: Theoretical background for scaling issues
+- **Measurement**: The scientific method applied to debugging
 
 ::: {.callout-note}
 ## Try It Yourself

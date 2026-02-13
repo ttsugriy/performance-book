@@ -226,7 +226,7 @@ For n = 32,768, d = 128:
   Reduction: 256×
 ```
 
-Chapter 10 derives FlashAttention in full detail, including:
+The FlashAttention chapter derives FlashAttention in full detail, including:
 
 - The complete tiled algorithm
 - Why failed approaches (sparse attention, gradient checkpointing) don't solve this problem
@@ -542,11 +542,11 @@ For most purposes in this book, we treat floating-point operations as associativ
 
 Associativity's value comes from how it interacts with hardware:
 
-**Memory Hierarchy** (Chapter 1): Chunking lets you fit working sets in cache. FlashAttention's blocks are sized to fit in GPU SRAM.
+**Memory Hierarchy**: Chunking lets you fit working sets in cache. FlashAttention's blocks are sized to fit in GPU SRAM.
 
-**Bandwidth** (Chapter 2): Streaming algorithms read data once rather than multiple times. FlashAttention reduces memory traffic by 4-8× beyond just reducing memory footprint.
+**Bandwidth**: Streaming algorithms read data once rather than multiple times. FlashAttention reduces memory traffic by 4-8× beyond just reducing memory footprint.
 
-**Parallelism** (Chapter 3): Associative operations enable tree reduction, the fundamental parallel primitive.
+**Parallelism**: Associative operations enable tree reduction, the fundamental parallel primitive.
 
 ```
 The Connection:

@@ -344,13 +344,13 @@ Reversibility trades compute for memory:
 
 Reversibility interacts with hardware constraints:
 
-**Memory Hierarchy** (Chapter 1): Reversible blocks need to recompute activations. This recomputation should ideally hit cache, not main memory.
+**Memory Hierarchy**: Reversible blocks need to recompute activations. This recomputation should ideally hit cache, not main memory.
 
-**Bandwidth** (Chapter 2): The backward pass of reversible networks streams through activations once (reconstructing), rather than reading stored activations. This can reduce memory traffic.
+**Bandwidth**: The backward pass of reversible networks streams through activations once (reconstructing), rather than reading stored activations. This can reduce memory traffic.
 
-**Parallelism** (Chapter 3): Reconstruction is sequential through layers—you must reconstruct layer L-1 before layer L-2. This limits parallelism in the backward pass.
+**Parallelism**: Reconstruction is sequential through layers—you must reconstruct layer L-1 before layer L-2. This limits parallelism in the backward pass.
 
-**Fusion** (Chapter 8): Reversible blocks benefit from operator fusion. Fusing F and G's operations reduces memory traffic during reconstruction.
+**Fusion**: Reversible blocks benefit from operator fusion. Fusing F and G's operations reduces memory traffic during reconstruction.
 
 ## Key Takeaways
 

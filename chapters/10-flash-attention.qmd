@@ -341,7 +341,7 @@ The row-by-row approach processes one query at a time. But GPU operations are ef
 
 **New question**: Can we process a tile of queries against a tile of keys/values, and combine tiles without recomputation?
 
-This is where Chapter 4's associativity insight becomes crucial.
+This is where the associativity insight from the Associativity chapter becomes crucial.
 
 ## The Softmax Challenge
 
@@ -1028,11 +1028,11 @@ The best systems offer both: portable default, hardware-specific fast paths.
 
 ## Connections
 
-**Chapter 1 (Memory Hierarchy)**: FlashAttention is fundamentally about keeping data in fast memory (SRAM) instead of slow memory (HBM).
+**Memory Hierarchy**: FlashAttention is fundamentally about keeping data in fast memory (SRAM) instead of slow memory (HBM).
 
-**Chapter 2 (Bandwidth)**: The algorithm is faster despite more FLOPs because memory bandwidth, not compute, is the bottleneck.
+**Bandwidth**: The algorithm is faster despite more FLOPs because memory bandwidth, not compute, is the bottleneck.
 
-**Chapter 4 (Associativity)**: The (max, sum, output) state forms a monoid—the mathematical foundation for chunking.
+**Associativity**: The (max, sum, output) state forms a monoid—the mathematical foundation for chunking.
 
 ## Property Audit
 

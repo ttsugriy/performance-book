@@ -776,7 +776,7 @@ The algorithm (tiled GEMM) and the hardware (tensor cores, shared memory hierarc
    - Associativity → parallelism and tiling
    - Locality → cache efficiency
    - Separability → independent computation per output
-   - (Sparsity → structured sparse GEMM, Chapter 6)
+   - (Sparsity → structured sparse GEMM, Skipping)
 
 ## The Meta-Lesson
 

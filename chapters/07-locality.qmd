@@ -22,7 +22,7 @@ This formalized what systems programmers knew intuitively: algorithms that work 
 
 ## The Cache Hierarchy Reality
 
-In Chapter 1, we saw the memory hierarchy:
+In Memory Hierarchy, we saw the memory hierarchy:
 
 | Level     | Size    | Latency      | Bandwidth    |
 |-----------|---------|--------------|--------------|
@@ -510,7 +510,7 @@ For sequence length N:
 - Working set: O(N²) attention matrix
 - At N=2048: 16 MB attention matrix
 
-This is why FlashAttention (Chapter 10) uses tiling—to restore locality to attention.
+This is why FlashAttention (from the FlashAttention chapter) uses tiling—to restore locality to attention.
 
 ### Batch Size and Locality
 
@@ -568,9 +568,9 @@ Quantization uses:
 
 We've now covered the six fundamental properties that make efficient algorithms possible:
 
-1. **Associativity**: Enables parallel and streaming computation (Chapter 4)
-2. **Separability**: Enables low-rank approximations and factorization (Chapter 5)
-3. **Sparsity**: Enables conditional computation and skipping (Chapter 6)
+1. **Associativity**: Enables parallel and streaming computation (from Associativity)
+2. **Separability**: Enables low-rank approximations and factorization (from Factoring)
+3. **Sparsity**: Enables conditional computation and skipping (from Skipping)
 4. **Locality**: Enables cache efficiency and tiling (this chapter)
 5. **Redundancy**: Enables compression and quantization
 6. **Symmetry**: Enables weight sharing and equivariant architectures

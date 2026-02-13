@@ -578,13 +578,13 @@ else:
 
 ## Connections
 
-**Chapter 1 (Memory Hierarchy)**: Profilers reveal cache misses that validate the hierarchy model.
+**Memory Hierarchy**: Profilers reveal cache misses that validate the hierarchy model.
 
-**Chapter 2 (Bandwidth)**: Memory throughput metrics in Nsight confirm bandwidth bounds.
+**Bandwidth**: Memory throughput metrics in Nsight confirm bandwidth bounds.
 
-**Chapter 15 (Measurement)**: This chapter provides the tools for the measurement methodology.
+**Measurement**: This chapter provides the tools for the measurement methodology.
 
-**Chapter 16 (Hypothesis)**: Profiling data forms the basis for performance hypotheses.
+**Hypothesis**: Profiling data forms the basis for performance hypotheses.
 
 ## Key Takeaways
 

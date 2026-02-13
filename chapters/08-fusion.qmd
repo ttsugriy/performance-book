@@ -309,11 +309,11 @@ The "fusion" here is extreme: all intermediates stay in SRAM, never touching HBM
 
 ## Connections
 
-**Chapter 2 (Bandwidth)**: Fusion reduces memory traffic, addressing the bandwidth bottleneck.
+**Bandwidth**: Fusion reduces memory traffic, addressing the bandwidth bottleneck.
 
-**Chapter 7 (Locality)**: Fusion improves temporal locality—data is reused before eviction from registers/cache.
+**Locality**: Fusion improves temporal locality—data is reused before eviction from registers/cache.
 
-**Chapter 10 (FlashAttention)**: The ultimate example of fusion principles applied to attention.
+**FlashAttention**: The ultimate example of fusion principles applied to attention.
 
 ## Key Takeaways
 

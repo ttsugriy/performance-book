@@ -514,9 +514,9 @@ def verify_precision_safety(model, test_loader, precision='fp16'):
 
 ## Connection to Other Chapters
 
-- **Chapter 4 (GPU Architecture)**: Tensor cores provide the hardware speedup for reduced precision
-- **Chapter 12 (Quantization)**: Post-training quantization for inference complements training-time precision choices
-- **Chapter 21 (Triton)**: Writing kernels that correctly handle mixed precision
+- **GPU Architecture**: Tensor cores provide the hardware speedup for reduced precision
+- **Quantization**: Post-training quantization for inference complements training-time precision choices
+- **Triton**: Writing kernels that correctly handle mixed precision
 
 ::: {.callout-note}
 ## Try It Yourself

@@ -293,7 +293,7 @@ Training requires FP16/FP32 for gradient precision. Inference doesn't.
 - FP16: 140GB (doesn't fit in 80GB A100)
 - INT4: 35GB (fits easily, with room for KV cache)
 
-See Chapter 12 for full quantization details.
+See Quantization for full quantization details.
 
 ## The Batch Size vs. Latency Tradeoff
 
@@ -395,13 +395,13 @@ class LLMServer:
 
 ## Connections
 
-**Chapter 1 (Memory Hierarchy)**: KV cache is fundamentally a locality optimization—keep frequently accessed data in fast memory.
+**Memory Hierarchy**: KV cache is fundamentally a locality optimization—keep frequently accessed data in fast memory.
 
-**Chapter 2 (Bandwidth)**: Decode phase is memory-bound. KV cache size directly determines bandwidth requirements.
+**Bandwidth**: Decode phase is memory-bound. KV cache size directly determines bandwidth requirements.
 
-**Chapter 10 (FlashAttention)**: Essential for prefill phase; enables long context with limited memory.
+**FlashAttention**: Essential for prefill phase; enables long context with limited memory.
 
-**Chapter 12 (Quantization)**: Critical for fitting large models and large KV caches in GPU memory.
+**Quantization**: Critical for fitting large models and large KV caches in GPU memory.
 
 ## Key Takeaways
 

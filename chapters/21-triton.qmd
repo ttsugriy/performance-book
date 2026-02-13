@@ -547,7 +547,7 @@ def benchmark_matmul(M, N, provider):
 benchmark_matmul.run(print_data=True, save_path='benchmark.png')
 ```
 
-This automatically generates comparison plots. See [Chapter 15: The Art of Measurement](15-measurement.qmd#gpu-benchmarking-the-do_bench-pattern) for a deeper discussion of GPU benchmarking methodology.
+This automatically generates comparison plots. See [The Art of Measurement](15-measurement.qmd#gpu-benchmarking-the-do_bench-pattern) for a deeper discussion of GPU benchmarking methodology.
 
 ## Debugging Triton Kernels
 
@@ -867,13 +867,13 @@ def benchmark(M, N):
 
 ## Connections
 
-**Chapter 4 (GPU Architecture)**: Triton abstracts GPU details but understanding grids/blocks/shared memory helps.
+**GPU Architecture**: Triton abstracts GPU details but understanding grids/blocks/shared memory helps.
 
-**Chapter 8 (Fusion)**: Triton enables fusion by writing multi-op kernels.
+**Fusion**: Triton enables fusion by writing multi-op kernels.
 
-**Chapter 10 (FlashAttention)**: Now you can implement it!
+**FlashAttention**: Now you can implement it!
 
-**Chapter 19 (Profiling)**: Use Nsight to verify Triton kernel performance.
+**Profiling**: Use Nsight to verify Triton kernel performance.
 
 ## Key Takeaways
 

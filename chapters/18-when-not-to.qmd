@@ -55,7 +55,7 @@ You can make your code 10× faster (100ms)... and the application still takes 9.
 
 **Rule**: Optimize the critical path, not the convenient path.
 
-**Amdahl's Law reminder** (from Chapter 3):
+**Amdahl's Law reminder** (from Parallelism):
 
 $$\text{Speedup} = \frac{1}{(1 - p) + \frac{p}{s}}$$
 
@@ -308,11 +308,11 @@ If any are false, reconsider.
 
 ## Connections
 
-**Chapter 15 (Measurement)**: You need profiling to know *what* to optimize.
+**Measurement**: You need profiling to know *what* to optimize.
 
-**Chapter 16 (Hypothesis)**: You need hypothesis-driven debugging to know *why* it's slow.
+**Hypothesis**: You need hypothesis-driven debugging to know *why* it's slow.
 
-**Chapter 17 (Analogy)**: You need pattern recognition to know *how* to fix it.
+**Analogy**: You need pattern recognition to know *how* to fix it.
 
 This chapter adds: knowing *when* to fix it—and when not to.
 

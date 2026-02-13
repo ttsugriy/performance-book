@@ -379,11 +379,11 @@ def find_optimal_quantization(model, eval_dataset, quality_threshold=0.95):
 
 Redundancy's value depends on hardware characteristics:
 
-**Memory bandwidth** (Chapter 2): Quantization from FP16 to INT4 reduces memory traffic by 4×. For memory-bound operations (most LLM inference), this translates directly to 4× throughput improvement.
+**Memory bandwidth** (from Bandwidth): Quantization from FP16 to INT4 reduces memory traffic by 4×. For memory-bound operations (most LLM inference), this translates directly to 4× throughput improvement.
 
 **Integer tensor cores**: Modern GPUs have specialized INT8/INT4 hardware that is 2-4× faster than FP16 tensor cores. Quantization unlocks these.
 
-**Cache hierarchy** (Chapter 1): KV cache fits in GPU SRAM for shorter sequences, enabling fast access. When the cache spills to HBM, latency increases—making cache size reduction via quantization or MQA critical.
+**Cache hierarchy** (from Memory Hierarchy): KV cache fits in GPU SRAM for shorter sequences, enabling fast access. When the cache spills to HBM, latency increases—making cache size reduction via quantization or MQA critical.
 
 ```
 The Connection:

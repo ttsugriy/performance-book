@@ -36,7 +36,7 @@ Target: <200ms P99. Barely making it at low load.
 
 At 10,000 req/s, the system collapses — queueing delays explode (@sec-queueing). Each technique in this chapter attacks a specific bottleneck in this pipeline. Let's see which ones give us that 10× throughput.
 
-Chapter 14 covered the fundamentals: KV caching, continuous batching, speculative decoding. This chapter goes deeper with production-grade techniques.
+The Inference chapter covered the fundamentals: KV caching, continuous batching, speculative decoding. This chapter goes deeper with production-grade techniques.
 
 ## Prefix Caching and RadixAttention
 
@@ -266,7 +266,7 @@ class DisaggregatedServer:
 
 ### Beyond Simple Speculation
 
-Chapter 14 covered basic speculative decoding. Advanced techniques:
+The Inference chapter covered basic speculative decoding. Advanced techniques:
 
 **1. Medusa: Multiple Heads**
 

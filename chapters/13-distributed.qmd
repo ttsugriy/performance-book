@@ -513,11 +513,11 @@ Where:
 
 ## Connections
 
-**Chapter 3 (Parallelism)**: Amdahl's Law governs distributed training—communication is the sequential portion that limits scaling.
+**Parallelism**: Amdahl's Law governs distributed training—communication is the sequential portion that limits scaling.
 
-**Chapter 7 (Locality)**: Keeping data on-device vs. communicating it is a locality decision at distributed scale.
+**Locality**: Keeping data on-device vs. communicating it is a locality decision at distributed scale.
 
-**Chapter 8 (Fusion)**: Fusing operations reduces activation memory, which enables larger microbatches in pipeline parallelism.
+**Fusion**: Fusing operations reduces activation memory, which enables larger microbatches in pipeline parallelism.
 
 ## Key Takeaways
 

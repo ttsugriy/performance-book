@@ -413,7 +413,7 @@ Sparse attention pattern:
 
 ### The FlashAttention Insight
 
-FlashAttention (Chapter 4, Chapter 10) takes a different approach: don't make attention sparse, but compute it *exactly* with better memory access.
+FlashAttention (Associativity, FlashAttention) takes a different approach: don't make attention sparse, but compute it *exactly* with better memory access.
 
 For many applications, FlashAttention + dense attention beats sparse attention:
 - No approximation error
@@ -619,7 +619,7 @@ class MonarchFFN(nn.Module):
 
 ### The Separability Connection
 
-Structured matrices are deeply connected to **separability** (Chapter 5):
+Structured matrices are deeply connected to **separability** (from Factoring):
 
 | Technique | Factorization | Separability Pattern |
 |-----------|---------------|---------------------|

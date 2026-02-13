@@ -604,15 +604,15 @@ For FP16/BF16 matrix operations, tensor cores give 10-20× speedup.
 
 ## Connections
 
-**Chapter 1 (Memory Hierarchy)**: GPU memory hierarchy is even steeper than CPU.
+**Memory Hierarchy**: GPU memory hierarchy is even steeper than CPU.
 
-**Chapter 2 (Bandwidth)**: HBM bandwidth is the primary constraint for most ML kernels.
+**Bandwidth**: HBM bandwidth is the primary constraint for most ML kernels.
 
-**Chapter 7 (Locality)**: Tiling with shared memory is locality optimization for GPUs.
+**Locality**: Tiling with shared memory is locality optimization for GPUs.
 
-**Chapter 10 (FlashAttention)**: Uses shared memory tiling to stay within GPU SRAM.
+**FlashAttention**: Uses shared memory tiling to stay within GPU SRAM.
 
-**Chapter 19 (Profiling)**: Nsight tools reveal GPU-specific bottlenecks.
+**Profiling**: Nsight tools reveal GPU-specific bottlenecks.
 
 ## Key Takeaways
 

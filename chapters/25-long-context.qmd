@@ -44,7 +44,7 @@ A100 80GB: Can hold a handful of full attention matrices at 64K, but full-model 
 H100 80GB: Similar constraint unless using multi-GPU sharding or sparse/streaming attention.
 ```
 
-FlashAttention (Chapter 10) solves the memory problem through chunking—but compute is still O(n²).
+FlashAttention (from the FlashAttention chapter) solves the memory problem through chunking—but compute is still O(n²).
 
 This chapter explores techniques for scaling beyond what a single GPU can handle.
 
@@ -719,13 +719,13 @@ Sequence Length    Technique
 
 ## Connection to Other Chapters
 
-**Chapter 10 (FlashAttention)**: Foundation—online softmax enables ring attention.
+**FlashAttention**: Foundation—online softmax enables ring attention.
 
-**Chapter 13 (Distributed)**: Ring attention is a distributed attention pattern.
+**Distributed**: Ring attention is a distributed attention pattern.
 
-**Chapter 14 (Inference)**: KV cache compression essential for long-context serving.
+**Inference**: KV cache compression essential for long-context serving.
 
-**Chapter 24 (MoE)**: MoE + long context = complex distributed setup.
+**MoE**: MoE + long context = complex distributed setup.
 
 ## Key Takeaways
 

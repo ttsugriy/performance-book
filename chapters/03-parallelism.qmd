@@ -401,8 +401,8 @@ The question isn't "how do I parallelize this?" but "should I parallelize this, 
 
 The answer often comes from the previous chapters:
 
-1. **Memory hierarchy** (Chapter 1): If your algorithm is memory-bound, more parallelism won't help after you saturate bandwidth
-2. **Arithmetic intensity** (Chapter 2): High intensity → parallelism helps. Low intensity → fix the algorithm first
+1. **Memory hierarchy** (from Memory Hierarchy): If your algorithm is memory-bound, more parallelism won't help after you saturate bandwidth
+2. **Arithmetic intensity** (from Bandwidth): High intensity → parallelism helps. Low intensity → fix the algorithm first
 
 ```
 The Decision Tree:
@@ -438,13 +438,13 @@ Is it slow?
 
 5. **Measure first**: Profile to find the bottleneck. If it's not compute-bound, parallelism isn't the answer
 
-6. **Hidden variables abound**: Parallelism introduces hidden variables—NUMA effects, cache contention, scheduler interference—that your mental model may not include. When scaling disappoints, use differential diagnosis (Chapter 16) to isolate which hidden variable is limiting you
+6. **Hidden variables abound**: Parallelism introduces hidden variables—NUMA effects, cache contention, scheduler interference—that your mental model may not include. When scaling disappoints, use differential diagnosis (from Hypothesis) to isolate which hidden variable is limiting you
 
 ## Connection to Mathematical Properties
 
 In the coming chapters, we'll see how mathematical structure determines parallelizability:
 
-- **Associativity** (Chapter 4): Operations that associate can be reduced in any order—enabling parallel reduction
+- **Associativity** (from Associativity): Operations that associate can be reduced in any order—enabling parallel reduction
 - **Commutativity**: Order-invariant operations can be reordered for better locality
 - **Independence**: Separable computations can run in parallel without coordination
 
